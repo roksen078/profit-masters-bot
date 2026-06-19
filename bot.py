@@ -4,1090 +4,506 @@ import json
 import os
 import re
 import time
+import threading
+import logging
 from flask import Flask
 from threading import Thread
-
-# ===============================
-# KEEP ALIVE (RENDER)
-# ===============================
 
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Profit Masters Bot is Running!"
-
-def run():
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    return "Profit Masters Bot V2 Running..."
+    
+    def run():
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000))
+    )
 
 def keep_alive():
-    t = Thread(target=run)
-    t.daemon = True
-    t.start()
+    server = Thread(target=run)
+    server.daemon = True
+    server.start()
+    
+    logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s : %(message)s"
+)
 
-# ===============================
-# ENVIRONMENT VARIABLES
-# ===============================
+logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
+bot = telebot.TeleBot(
+    BOT_TOKEN,
+    parse_mode="HTML"
+)
 
-bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
+DATA_DIR = "data"
 
-# ===============================
-# FILES
-# ===============================
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
 
-SETTINGS_FILE = "settings.json"
-USERS_FILE = "users.json"
-BACKUP_FOLDER = "backup"
+USERS_FILE = os.path.join(DATA_DIR, "users.json")
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+def load_json(file_name, default):
+    try:
+        if os.path.exists(file_name):
+            with open(file_name, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(e)
 
-# ===============================
-# CURSOR YAHAN CHHOD DENA
-# AGLE PART ME YAHI SE CODE START HOGA
-# ===============================# ===============================
-# JSON FUNCTIONS
-# ===============================
-
-if not os.path.exists(BACKUP_FOLDER):
-    os.makedirs(BACKUP_FOLDER)
-
-
-def load_settings():
-    if not os.path.exists(SETTINGS_FILE):
-        default = {
-            "maintenance": False,
-            "force_join": False,
-            "start_message": None,
-            "start_image": None,
-            "channel": "",
-            "buttons": [],
-            "admins": [ADMIN_ID]
-        }
-
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(default, f, indent=4)
-
-    with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return default
 
 
-def save_settings(data):
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
+def save_json(file_name, data):
+    try:
+        with open(file_name, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        logger.error(e)
+        users = load_json(USERS_FILE, {})
+
+settings = load_json(
+    SETTINGS_FILE,
+    {
+        "welcome_photo": "",
+        "welcome_caption": "",
+        "channels": [],
+        "buttons": [],
+        "force_join": True,
+        "maintenance": False
+    }
+)
 
 
-def load_users():
-    if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w") as f:
-            json.dump([], f)
-
-    with open(USERS_FILE, "r") as f:
-        return json.load(f)
+def save_settings():
+    save_json(SETTINGS_FILE, settings)
+    def save_users():
+    save_json(USERS_FILE, users)
 
 
-def save_users(users):
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, indent=4)
+def get_setting(key, default=None):
+    return settings.get(key, default)
 
 
-settings = load_settings()
-users = load_users()
-
-# ===============================
-# CURSOR YAHI CHHOD DENA
-# PART 3 YAHIN SE START HOGA
-# ===============================# ===============================
-# UTILITY FUNCTIONS
-# ===============================
-
-def is_admin(user_id):
-    return user_id in settings.get("admins", [])
+def set_setting(key, value):
+    settings[key] = value
+    save_settings()
 
 
-def add_user(user_id):
-    global users
+def is_maintenance():
+    return settings.get("maintenance", False)
+    def is_admin(message):
+    return message.from_user.id == ADMIN_ID
+
+
+    def add_user(user_id):
+    user_id = str(user_id)
 
     if user_id not in users:
-        users.append(user_id)
-        save_users(users)
+        users[user_id] = {
+            "joined": True,
+            "blocked": False,
+            "date": int(time.time())
+        }
+        save_users()
 
 
-def get_total_users():
+    def total_users():
     return len(users)
 
 
-def backup_settings():
-    filename = os.path.join(BACKUP_FOLDER, "settings_backup.json")
-
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=4)
+def get_user(user_id):
+    return users.get(str(user_id), {})
 
 
-def backup_users():
-    filename = os.path.join(BACKUP_FOLDER, "users_backup.json")
+def set_user_value(user_id, key, value):
+    user_id = str(user_id)
 
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(users, f, indent=4)
+    if user_id not in users:
+        add_user(user_id)
 
-
-# ===============================
-# CURSOR YAHI CHHOD DENA
-# PART 4 YAHIN SE START HOGA
-# ===============================# ===============================
-# FORCE JOIN CHECK
-# ===============================
-
-def check_force_join(user_id):
-    channel = settings.get("channel", "")
-
-    if channel == "":
-        return True
-
-    try:
-        member = bot.get_chat_member(channel, user_id)
-
-        if member.status in ["creator", "administrator", "member"]:
-            return True
-
-        return False
-
-    except Exception:
-        return False
+    users[user_id][key] = value
+    save_users()
 
 
-def force_join_message():
-    markup = types.InlineKeyboardMarkup()
+def get_user_value(user_id, key, default=None):
+    return users.get(str(user_id), {}).get(key, default)
+    def create_main_keyboard():
+    markup = types.InlineKeyboardMarkup(row_width=2)
 
-    channel = settings.get("channel", "")
+    buttons = settings.get("buttons", [])
 
-    if channel:
-        markup.add(
-            types.InlineKeyboardButton(
-                "📢 Join Channel",
-                url=f"https://t.me/{channel.replace('@','')}"
+    for i in range(0, min(len(buttons), 4), 2):
+        row = []
+
+        for btn in buttons[i:i + 2]:
+            row.append(
+                types.InlineKeyboardButton(
+                    text=btn["text"],
+                    url=btn["url"]
+                )
             )
+
+        markup.row(*row)
+        markup.row(
+        types.InlineKeyboardButton(
+            "🎁 Get My Free Code",
+            callback_data="get_code"
         )
+    )
+
+    return markup
+    def check_force_join(user_id):
+    channels = settings.get("channels", [])
+
+    for channel in channels:
+        try:
+            member = bot.get_chat_member(channel, user_id)
+            if member.status in ["left", "kicked"]:
+                return False
+        except Exception:
+            return False
+
+    return True
+    def send_force_join(message):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+
+    for channel in settings.get("channels", []):
+        try:
+            chat = bot.get_chat(channel)
+            invite = bot.export_chat_invite_link(channel)
+
+            markup.add(
+                types.InlineKeyboardButton(
+                    f"📢 Join {chat.title}",
+                    url=invite
+                )
+            )
+        except Exception:
+            pass
 
     markup.add(
         types.InlineKeyboardButton(
-            "✅ Joined",
+            "✅ I've Joined",
             callback_data="check_join"
         )
     )
 
-    return markup
-
-
-@bot.callback_query_handler(func=lambda call: call.data == "check_join")
+    bot.send_message(
+        message.chat.id,
+        "⚠️ Please join all required channels first.",
+        reply_markup=markup
+    )
+    @bot.callback_query_handler(func=lambda call: call.data == "check_join")
 def check_join_callback(call):
-
     if check_force_join(call.from_user.id):
         bot.answer_callback_query(
             call.id,
-            "✅ Verification Successful!"
+            "✅ Verification successful!"
         )
 
-        bot.delete_message(
-            call.message.chat.id,
-            call.message.message_id
-        )
+        try:
+            bot.delete_message(
+                call.message.chat.id,
+                call.message.message_id
+            )
+        except Exception:
+            pass
+
+        send_welcome(call.message)
 
     else:
         bot.answer_callback_query(
             call.id,
-            "❌ Please join the channel first.",
+            "❌ You haven't joined all channels yet.",
             show_alert=True
-        )
-
-
-# ===============================
-# CURSOR YAHI CHHOD DENA
-# PART 5 YAHIN SE START HOGA
-# ===============================# ===============================
-# START COMMAND
-# ===============================
-
-@bot.message_handler(commands=["start"])
-def start(message):
-
+        )def send_welcome(message):
     add_user(message.from_user.id)
 
-    if not check_force_join(message.from_user.id):
-        bot.send_message(
-            message.chat.id,
-            "⚠️ Please join our channel first.",
-            reply_markup=force_join_message()
-        )
-        return
+    photo = get_setting("welcome_photo", "")
+    caption = get_setting("welcome_caption", "")
 
-    text = settings.get("start_message")
-
-    if not text:
-        text = (
-            "👋 Welcome to Profit Masters Bot!\n\n"
-            "Use the menu below."
+    if not caption:
+        caption = (
+            "👋 <b>Welcome!</b>\n\n"
+            "Click the button below to claim your free code."
         )
 
-    markup = types.InlineKeyboardMarkup()
-
-    buttons = settings.get("buttons", [])
-
-    for btn in buttons:
-        try:
-            markup.add(
-                types.InlineKeyboardButton(
-                    btn["text"],
-                    url=btn["url"]
-                )
-            )
-        except:
-            pass
-
-    image = settings.get("start_image")
+    markup = create_main_keyboard()
 
     try:
-        if image:
+        if photo:
             bot.send_photo(
                 message.chat.id,
-                image,
-                caption=text,
+                photo,
+                caption=caption,
                 parse_mode="HTML",
-                reply_markup=markup if buttons else None
+                reply_markup=markup
             )
-        else:
+            else:
             bot.send_message(
                 message.chat.id,
-                text,
+                caption,
                 parse_mode="HTML",
-                reply_markup=markup if buttons else None
+                reply_markup=markup
             )
-    except:
+
+    except Exception:
         bot.send_message(
             message.chat.id,
-            text,
+            caption,
             parse_mode="HTML",
-            reply_markup=markup if buttons else None
+            reply_markup=markup
         )
+@bot.message_handler(commands=["start"])
+def start_command(message):
+    if is_maintenance() and not is_admin(message):
+        bot.reply_to(
+            message,
+            "🚧 Bot is currently under maintenance."
+        )
+        return
 
+    if settings.get("force_join", True):
+        if not check_force_join(message.from_user.id):
+            send_force_join(message)
+            return
 
-# ===============================
-# ADMIN CHECK
-# ===============================
-
-def admin_only(message):
-    return is_admin(message.from_user.id)
-
-
-# ===============================
-# CURSOR YAHI CHHOD DENA
-# PART 6 YAHIN SE START HOGA
-# ===============================# ===============================
-# ADMIN PANEL
-# ===============================
-
-def admin_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-
-    markup.row("📊 Statistics", "📢 Broadcast")
-    markup.row("📝 Start Message", "🖼 Start Photo")
-    markup.row("➕ Buttons", "📺 Force Join")
-
-    markup.row("👮 Admins", "⚙ Settings")
-    markup.row("💾 Backup", "♻ Restore")
-
-    markup.row("🔑 Bot Token", "🆔 Admin ID")
-    markup.row("📂 Export Users", "📥 Import Settings")
-
-    markup.row("🔧 Maintenance", "❌ Close Panel")
-
-    return markup
-
-
-@bot.message_handler(commands=["admin"])
+    send_welcome(message)
+    @bot.message_handler(commands=["admin"])
 def admin_panel(message):
-
-    if not admin_only(message):
+    if not is_admin(message):
         return
-
-    bot.send_message(
-        message.chat.id,
-        "⚙ <b>Profit Masters Admin Panel</b>\n\n"
-        "Select any option below.",
-        parse_mode="HTML",
-        reply_markup=admin_keyboard()
-    )
-
-
-@bot.message_handler(func=lambda m: m.text == "❌ Close Panel")
-def close_panel(message):
-
-    if not admin_only(message):
-        return
-
-    bot.send_message(
-        message.chat.id,
-        "✅ Admin Panel Closed.",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
-
-
-# ===============================
-# CURSOR YAHI CHHOD DENA
-# PART 6B YAHIN SE START HOGA
-# ===============================# ===============================
-# STATISTICS
-# ===============================
-
-@bot.message_handler(func=lambda m: m.text == "📊 Statistics")
-def statistics(message):
-
-    if not admin_only(message):
-        return
-
-    total = get_total_users()
 
     text = (
-        "📊 <b>Bot Statistics</b>\n\n"
-        f"👥 Total Users : <b>{total}</b>\n"
-        f"👮 Total Admins : <b>{len(settings.get('admins', []))}</b>\n"
-        f"📺 Force Join : <b>{settings.get('channel') or 'Not Set'}</b>\n"
-        f"🛠 Maintenance : <b>{'ON' if settings.get('maintenance') else 'OFF'}</b>"
+        "⚙️ <b>Admin Panel</b>\n\n"
+        "Choose an option below."
+    )
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
+
+    markup.add(
+        types.InlineKeyboardButton(
+            "🖼 Welcome Photo",
+            callback_data="admin_photo"
+        ),
+        types.InlineKeyboardButton(
+            "📝 Welcome Caption",
+            callback_data="admin_caption"
+        )
+    )
+    markup.add(
+        types.InlineKeyboardButton(
+            "🔘 Buttons",
+            callback_data="admin_buttons"
+        ),
+        types.InlineKeyboardButton(
+            "🎁 Get My Free Code",
+            callback_data="admin_code"
+        )
+    )
+
+    markup.add(
+        types.InlineKeyboardButton(
+            "📢 Force Join",
+            callback_data="admin_channels"
+        ),
+        types.InlineKeyboardButton(
+            "🛠 Maintenance",
+            callback_data="admin_maintenance"
+        )
+    )
+    markup.add(
+        types.InlineKeyboardButton(
+            "📊 Statistics",
+            callback_data="admin_stats"
+        ),
+        types.InlineKeyboardButton(
+            "📤 Broadcast",
+            callback_data="admin_broadcast"
+        )
     )
 
     bot.send_message(
         message.chat.id,
         text,
-        parse_mode="HTML"
-    )
-
-
-# ===============================
-# MAINTENANCE MODE
-# ===============================
-
-@bot.message_handler(func=lambda m: m.text == "🔧 Maintenance")
-def maintenance_menu(message):
-
-    if not admin_only(message):
-        return
-
-    markup = types.InlineKeyboardMarkup()
-
-    markup.row(
-        types.InlineKeyboardButton(
-            "🟢 ON",
-            callback_data="maintenance_on"
-        ),
-        types.InlineKeyboardButton(
-            "🔴 OFF",
-            callback_data="maintenance_off"
-        )
-    )
-
-    bot.send_message(
-        message.chat.id,
-        "🔧 Maintenance Mode",
-        reply_markup=markup
-    )
-
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("maintenance_"))
-def maintenance_callback(call):
-
-    if not is_admin(call.from_user.id):
-        return
-
-    if call.data == "maintenance_on":
-        settings["maintenance"] = True
-        save_settings(settings)
-        backup_settings()
-
-        bot.edit_message_text(
-            "🟢 Maintenance Enabled",
-            call.message.chat.id,
-            call.message.message_id
-        )
-
-    elif call.data == "maintenance_off":
-        settings["maintenance"] = False
-        save_settings(settings)
-        backup_settings()
-
-        bot.edit_message_text(
-            "🔴 Maintenance Disabled",
-            call.message.chat.id,
-            call.message.message_id
-        )
-
-
-# ===============================
-# CURSOR YAHI CHHOD DENA
-# PART 6B-2 YAHIN SE START HOGA
-# ===============================
-# ======================================
-# PART 6B-2A
-# BROADCAST SYSTEM (STEP 1)
-# ======================================
-
-broadcast_data = {
-    "mode": None,
-    "button_text": None,
-    "button_url": None,
-    "message": None,
-    "photo": None,
-    "forward": None
-}
-
-waiting_broadcast = {}
-
-# ----------------------------
-# Broadcast Menu
-# ----------------------------
-
-@bot.message_handler(func=lambda m: m.text == "📢 Broadcast")
-def broadcast_menu(message):
-
-    if not admin_only(message):
-        return
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-
-    markup.row("📝 Text Broadcast", "🖼 Photo Broadcast")
-    markup.row("📨 Forward Broadcast")
-    markup.row("❌ Cancel Broadcast")
-
-    bot.send_message(
-        message.chat.id,
-        "📢 <b>Broadcast Panel</b>\n\n"
-        "Select broadcast type.",
         parse_mode="HTML",
         reply_markup=markup
     )
-
-
-# ----------------------------
-# Cancel Broadcast
-# ----------------------------
-
-@bot.message_handler(func=lambda m: m.text == "❌ Cancel Broadcast")
-def cancel_broadcast(message):
-
-    if not admin_only(message):
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
+def admin_callbacks(call):
+    if not is_admin(call.message):
         return
 
-    waiting_broadcast.clear()
+    bot.answer_callback_query(call.id)
 
-    bot.send_message(
-        message.chat.id,
-        "❌ Broadcast Cancelled.",
-        reply_markup=admin_keyboard()
-    )
-
-
-# ----------------------------
-# Text Broadcast
-# ----------------------------
-
-@bot.message_handler(func=lambda m: m.text == "📝 Text Broadcast")
-def text_broadcast(message):
-
-    if not admin_only(message):
-        return
-
-    waiting_broadcast[message.from_user.id] = "text"
-
-    bot.send_message(
-        message.chat.id,
-        "📝 Send the broadcast text."
-    )
-
-
-# ----------------------------
-# Photo Broadcast
-# ----------------------------
-
-@bot.message_handler(func=lambda m: m.text == "🖼 Photo Broadcast")
-def photo_broadcast(message):
-
-    if not admin_only(message):
-        return
-
-    waiting_broadcast[message.from_user.id] = "photo"
-
-    bot.send_message(
-        message.chat.id,
-        "🖼 Send photo with caption."
-    )
-
-
-# ----------------------------
-# Forward Broadcast
-# ----------------------------
-
-@bot.message_handler(func=lambda m: m.text == "📨 Forward Broadcast")
-def forward_broadcast(message):
-
-    if not admin_only(message):
-        return
-
-    waiting_broadcast[message.from_user.id] = "forward"
-
-    bot.send_message(
-        message.chat.id,
-        "📨 Forward any message."
-    )# ======================================
-# PART 6B-2B
-# CONTINUE FROM HERE (PASTE BELOW LINE 539)
-# ======================================
-
-@bot.message_handler(func=lambda m: waiting_broadcast.get(m.from_user.id) == "text", content_types=["text"])
-def receive_text_broadcast(message):
-
-    if not admin_only(message):
-        return
-
-    broadcast_data["mode"] = "text"
-    broadcast_data["message"] = message.text
-
-    waiting_broadcast[message.from_user.id] = "button_text"
-
-    bot.send_message(
-        message.chat.id,
-        "🔘 Send Register Button Text."
-    )
-
-
-@bot.message_handler(func=lambda m: waiting_broadcast.get(m.from_user.id) == "button_text", content_types=["text"])
-def receive_button_text(message):
-
-    if not admin_only(message):
-        return
-
-    broadcast_data["button_text"] = message.text
-
-    waiting_broadcast[message.from_user.id] = "button_url"
-
-    bot.send_message(
-        message.chat.id,
-        "🌐 Send Register Button Link."
-    )
-
-
-@bot.message_handler(func=lambda m: waiting_broadcast.get(m.from_user.id) == "button_url", content_types=["text"])
-def receive_button_url(message):
-
-    if not admin_only(message):
-        return
-
-    broadcast_data["button_url"] = message.text
-
-    waiting_broadcast.pop(message.from_user.id, None)
-
-    markup = types.InlineKeyboardMarkup()
-
-    markup.add(
-        types.InlineKeyboardButton(
-            "✅ Start Broadcast",
-            callback_data="start_broadcast"
+    if call.data == "admin_photo":
+        bot.send_message(
+            call.message.chat.id,
+            "🖼 Send the new welcome photo."
         )
-    )
-
-    markup.add(
-        types.InlineKeyboardButton(
-            "❌ Cancel",
-            callback_data="cancel_final_broadcast"
+        bot.register_next_step_handler(
+            call.message,
+            save_welcome_photo
         )
-    )
+        elif call.data == "admin_caption":
+        bot.send_message(
+            call.message.chat.id,
+            "📝 Send the new welcome caption."
+        )
+        bot.register_next_step_handler(
+            call.message,
+            save_welcome_caption
+        )
 
-    bot.send_message(
-        message.chat.id,
-        "✅ Broadcast Ready.\n\nPress Start Broadcast.",
-        reply_markup=markup
-    )# =====================================
-# PART 6B-2C
-# START BROADCAST CALLBACK
-# =====================================
+    elif call.data == "admin_buttons":
+        bot.send_message(
+            call.message.chat.id,
+            "🔘 Send buttons in this format:\n\nButton Name | https://example.com"
+        )
+        bot.register_next_step_handler(
+            call.message,
+            save_buttons
+        )
+elif call.data == "admin_code":
+        bot.send_message(
+            call.message.chat.id,
+            "🎁 Send your Get My Free Code text."
+        )
+        bot.register_next_step_handler(
+            call.message,
+            save_code
+        )
 
-@bot.callback_query_handler(func=lambda c: c.data == "cancel_final_broadcast")
-def cancel_final_broadcast(call):
+    elif call.data == "admin_channels":
+        bot.send_message(
+            call.message.chat.id,
+            "📢 Send channel usernames.\nOne username per line.\nExample:\n@channel1\n@channel2"
+        )
+        bot.register_next_step_handler(
+            call.message,
+            save_channels
+        )
+elif call.data == "admin_maintenance":
+        settings["maintenance"] = not settings.get("maintenance", False)
+        save_settings()
 
-    if not is_admin(call.from_user.id):
+        status = "🟢 OFF" if not settings["maintenance"] else "🔴 ON"
+
+        bot.answer_callback_query(
+            call.id,
+            f"Maintenance Mode: {status}"
+        )
+
+        admin_panel(call.message)
+
+    elif call.data == "admin_stats":
+        bot.send_message(
+            call.message.chat.id,
+            f"👥 Total Users: {total_users()}"
+        )
+elif call.data == "admin_broadcast":
+        bot.send_message(
+            call.message.chat.id,
+            "📤 Send the broadcast message."
+        )
+        bot.register_next_step_handler(
+            call.message,
+            broadcast_message
+        )
+def save_welcome_photo(message):
+    if not message.photo:
+        bot.reply_to(message, "❌ Please send a photo.")
         return
 
-    waiting_broadcast.pop(call.from_user.id, None)
+    file_id = message.photo[-1].file_id
+    set_setting("welcome_photo", file_id)
 
-    broadcast_data["mode"] = None
-    broadcast_data["button_text"] = None
-    broadcast_data["button_url"] = None
-    broadcast_data["message"] = None
-    broadcast_data["photo"] = None
-    broadcast_data["forward"] = None
-
-    bot.edit_message_text(
-        "❌ Broadcast Cancelled.",
-        call.message.chat.id,
-        call.message.message_id
+    bot.reply_to(
+        message,
+        "✅ Welcome photo updated."
     )
 
 
-@bot.callback_query_handler(func=lambda c: c.data == "start_broadcast")
-def start_broadcast_callback(call):
+def save_welcome_caption(message):
+    set_setting("welcome_caption", message.text)
 
-    if not is_admin(call.from_user.id):
-        return
+    bot.reply_to(
+        message,
+        "✅ Welcome caption updated."
+    )
+def save_buttons(message):
+    buttons = []
 
+    for line in message.text.splitlines():
+        if "|" not in line:
+            continue
+
+        text, url = line.split("|", 1)
+
+        buttons.append({
+            "text": text.strip(),
+            "url": url.strip()
+        })
+
+    settings["buttons"] = buttons
+    save_settings()
+
+    bot.reply_to(
+        message,
+        "✅ Buttons updated."
+    )
+
+
+def save_code(message):
+    set_setting("code", message.text)
+
+    bot.reply_to(
+        message,
+        "✅ Get My Free Code updated."
+    )
+def save_channels(message):
+    channels = []
+
+    for line in message.text.splitlines():
+        line = line.strip()
+
+        if line:
+            channels.append(line)
+
+    settings["channels"] = channels
+    save_settings()
+
+    bot.reply_to(
+        message,
+        "✅ Force Join channels updated."
+    )
+
+
+def broadcast_message(message):
     sent = 0
-    failed = 0
 
-    markup = None
-
-    if broadcast_data["button_text"] and broadcast_data["button_url"]:
-        markup = types.InlineKeyboardMarkup()
-        markup.add(
-            types.InlineKeyboardButton(
-                broadcast_data["button_text"],
-                url=broadcast_data["button_url"]
-            )
-        )
-
-    users = load_users()
-
-    for uid in users:
-
+    for user_id in users.keys():
         try:
-
-            if broadcast_data["mode"] == "text":
-
-                bot.send_message(
-                    uid,
-                    broadcast_data["message"],
-                    parse_mode="HTML",
-                    reply_markup=markup
-                )
-
-            elif broadcast_data["mode"] == "photo":
-
-                bot.send_photo(
-                    uid,
-                    broadcast_data["photo"],
-                    caption=broadcast_data["message"],
-                    parse_mode="HTML",
-                    reply_markup=markup
-                )
-
-            elif broadcast_data["mode"] == "forward":
-
-                bot.forward_message(
-                    uid,
-                    broadcast_data["forward"].chat.id,
-                    broadcast_data["forward"].message_id
-                )
-
+            bot.copy_message(
+                int(user_id),
+                message.chat.id,
+                message.message_id
+            )
             sent += 1
-
-        except:
-            failed += 1
-
-    bot.edit_message_text(
-        f"""✅ <b>Broadcast Completed Successfully</b>
-
-👥 Total Users      : {len(users)}
-✅ Successfully Sent: {sent}
-❌ Failed           : {failed}
-
-━━━━━━━━━━━━━━━━━━
-📊 Live Analytics
-👆 Register Clicks : 0
-📈 Click Rate      : 0%
-━━━━━━━━━━━━━━━━━━
-
-🕒 Last Click : --
-🔄 Status     : LIVE""",
-        call.message.chat.id,
-        call.message.message_id,
-        parse_mode="HTML"
+        except Exception:
+            pass
+            bot.reply_to(
+        message,
+        f"✅ Broadcast sent to {sent} users."
     )
 
-    broadcast_data["mode"] = None
-    broadcast_data["button_text"] = None
-    broadcast_data["button_url"] = None
-    broadcast_data["message"] = None
-    broadcast_data["photo"] = None
-    broadcast_data["forward"] = None# =====================================
-# PART 6B-2D
-# LIVE CLICK TRACKING
-# =====================================
 
-click_stats = {
-    "total_clicks": 0,
-    "last_click": "--"
-}
-
-
-def register_click(user_id):
-    global click_stats
-
-    click_stats["total_clicks"] += 1
-    click_stats["last_click"] = time.strftime("%d-%m-%Y %H:%M:%S")
-
-    try:
-        with open("click_stats.json", "w") as f:
-            json.dump(click_stats, f, indent=4)
-    except:
-        pass
-
-
-try:
-    with open("click_stats.json", "r") as f:
-        click_stats = json.load(f)
-except:
-    pass
-
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("register_click"))
-def register_click_callback(call):
-
-    register_click(call.from_user.id)
-
-    bot.answer_callback_query(
-        call.id,
-        "✅ Registered Successfully!"
-    )# =====================================
-# PART 6B-2E
-# REGISTER BUTTON + LIVE COUNT
-# =====================================
-
-broadcast_clicks = {}
-
-def create_register_markup(post_id, text, url):
-    markup = types.InlineKeyboardMarkup()
-
-    markup.add(
-        types.InlineKeyboardButton(
-            text,
-            callback_data=f"register_{post_id}"
-        )
-    )
-
-    markup.add(
-        types.InlineKeyboardButton(
-            "🌐 Open Link",
-            url=url
-        )
-    )
-
-    return markup
-
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("register_"))
-def register_button_clicked(call):
-
-    post_id = call.data.split("_", 1)[1]
-
-    if post_id not in broadcast_clicks:
-        broadcast_clicks[post_id] = {
-            "clicks": 0,
-            "users": []
-        }
-
-    if call.from_user.id not in broadcast_clicks[post_id]["users"]:
-        broadcast_clicks[post_id]["users"].append(call.from_user.id)
-        broadcast_clicks[post_id]["clicks"] += 1
-
-    register_click(call.from_user.id)
-
-    bot.answer_callback_query(
-        call.id,
-        "✅ Click Recorded Successfully!"
-    )# =====================================
-# PART 6B-2F
-# SAVE CLICK DATA
-# =====================================
-
-def save_clicks():
-    try:
-        with open("broadcast_clicks.json", "w") as f:
-            json.dump(broadcast_clicks, f, indent=4)
-    except:
-        pass
-
-
-def load_clicks():
-    global broadcast_clicks
-
-    try:
-        with open("broadcast_clicks.json", "r") as f:
-            broadcast_clicks = json.load(f)
-    except:
-        broadcast_clicks = {}
-
-
-load_clicks()
-
-
-def get_post_clicks(post_id):
-    if post_id in broadcast_clicks:
-        return broadcast_clicks[post_id]["clicks"]
-    return 0
-
-
-def get_click_rate(post_id, total_users):
-    if total_users == 0:
-        return 0
-
-    return round(
-        (get_post_clicks(post_id) / total_users) * 100,
-        2
-    )# =====================================
-# PART 6B-2G
-# UPDATE LIVE ANALYTICS
-# =====================================
-
-def update_live_report(
-    chat_id,
-    message_id,
-    post_id,
-    total_users,
-    sent,
-    failed
-):
-
-    clicks = get_post_clicks(post_id)
-    rate = get_click_rate(post_id, total_users)
-
-    try:
-        bot.edit_message_text(
-            f"""✅ <b>Broadcast Completed Successfully</b>
-
-👥 Total Users      : {total_users}
-✅ Successfully Sent: {sent}
-❌ Failed           : {failed}
-
-━━━━━━━━━━━━━━━━━━
-📊 <b>Live Analytics</b>
-
-👆 Register Clicks : {clicks}
-📈 Click Rate      : {rate}%
-
-━━━━━━━━━━━━━━━━━━
-
-🕒 Last Click : {click_stats['last_click']}
-🔄 Status     : LIVE
-""",
-            chat_id,
-            message_id,
-            parse_mode="HTML"
-        )
-    except:
-        pass# =================================
-# PART 6B-2H
-# RESET LIVE ANALYTICS
-# =================================
-
-def reset_click_stats():
-    global click_stats
-    global broadcast_clicks
-
-    click_stats = {
-        "total_clicks": 0,
-        "last_click": "--"
-    }
-
-    broadcast_clicks = {}
-
-    try:
-        with open("click_stats.json", "w") as f:
-            json.dump(click_stats, f, indent=4)
-
-        with open("broadcast_clicks.json", "w") as f:
-            json.dump(broadcast_clicks, f, indent=4)
-    except:
-        pass
-
-
-def new_post_id():
-    return str(int(time.time()))
-
-
-def prepare_live_post():
-    post_id = new_post_id()
-
-    broadcast_clicks[post_id] = {
-        "clicks": 0,
-        "users": []
-    }
-
-    save_clicks()
-
-    return post_id# =================================
-# PART 6B-2I
-# BROADCAST FINAL HELPERS
-# =================================
-
-def clear_broadcast():
-    global broadcast_data
-
-    broadcast_data["mode"] = None
-    broadcast_data["button_text"] = None
-    broadcast_data["button_url"] = None
-    broadcast_data["message"] = None
-    broadcast_data["photo"] = None
-    broadcast_data["forward"] = None
-
-
-def get_live_stats(post_id):
-    clicks = get_post_clicks(post_id)
-    rate = get_click_rate(post_id, get_total_users())
-
-    return {
-        "clicks": clicks,
-        "rate": rate,
-        "last_click": click_stats.get("last_click", "--")
-    }# =================================
-# PART 6B-2J
-# SAVE LIVE REPORT
-# =================================
-
-def save_live_report(post_id):
-    save_clicks()
-
-    try:
-        with open("live_post.json", "w") as f:
-            json.dump({
-                "post_id": post_id,
-                "clicks": get_post_clicks(post_id),
-                "rate": get_click_rate(post_id, get_total_users()),
-                "last_click": click_stats.get("last_click", "--")
-            }, f, indent=4)
-    except:
-        pass
-
-
-def load_live_report():
-    try:
-        with open("live_post.json", "r") as f:
-            return json.load(f)
-    except:
-        return None# =================================
-# PART 6B-2K
-# LIVE REPORT REFRESH
-# =================================
-
-def refresh_live_report(chat_id, message_id, post_id):
-    stats = get_live_stats(post_id)
-
-    try:
-        bot.edit_message_text(
-            f"""✅ <b>Broadcast Live Report</b>
-
-👥 Total Clicks : <b>{stats['clicks']}</b>
-📈 Click Rate : <b>{stats['rate']}%</b>
-
-🕒 Last Click : <b>{stats['last_click']}</b>
-🟢 Status : <b>LIVE</b>
-""",
-            chat_id,
-            message_id,
-            parse_mode="HTML"
-        )
-    except:
-        pass# =================================
-# PART 6B-2L
-# AUTO UPDATE LIVE REPORT
-# =================================
-
-def update_live_report(
-    chat_id,
-    message_id,
-    post_id,
-    interval=10
-):
-    try:
-        report = load_live_report()
-
-        if not report:
-            return
-
-        if report["post_id"] != post_id:
-            return
-
-        refresh_live_report(
-            chat_id,
-            message_id,
-            post_id
-        )
-
-    except:
-        pass# =================================
-# PART 6B-2M
-# AUTO REFRESH WRAPPER
-# =================================
-
-def auto_refresh_live(chat_id, message_id, post_id):
-    try:
-        report = load_live_report()
-
-        if not report:
-            return
-
-        if report.get("post_id") != post_id:
-            return
-
-        refresh_live_report(
-            chat_id,
-            message_id,
-            post_id
-        )
-
-        save_live_report(post_id)
-
-    except:
-        pass# =================================
-# PART 6B-2N
-# FINAL LIVE UPDATE CALL
-# =================================
-
-def update_dashboard(chat_id, message_id, post_id):
-    try:
-        auto_refresh_live(
-            chat_id,
-            message_id,
-            post_id
-        )
-
-        refresh_live_report(
-            chat_id,
-            message_id,
-            post_id
-        )
-
-    except:
-        pass# =================================
-# PART 6B-2O
-# RUN LIVE DASHBOARD
-# =================================
-
-def start_live_dashboard(chat_id, message_id, post_id):
-    try:
-        update_dashboard(
-            chat_id,
-            message_id,
-            post_id
-        )
-
-    except:
-        pass# =================================
-# PART 6B-2P
-# START DASHBOARD AFTER BROADCAST
-# =================================
-
-def launch_live_dashboard(chat_id, message_id, post_id):
-    try:
-        start_live_dashboard(
-            chat_id,
-            message_id,
-            post_id
-        )
-    except:
-        pass
+bot.infinity_polling(
+    none_stop=True,
+    skip_pending=True
+)
