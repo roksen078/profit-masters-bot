@@ -65,7 +65,7 @@ DEFAULT_SETTINGS = {
     "welcome_photo": "https://graph.org/file/f6e7c7a523ab65cb6fcd9.jpg", 
     "welcome_caption": EXACT_WELCOME_TEXT,
     "free_code_text": "🎁 MASTER-PROFIT-CODE-2026-X79",
-    "verification_btn_text": "🎁 Get My Free Code", # Dynamic Verification Button text managed by Admin
+    "verification_btn_text": "🎁 Get My Free Code", 
     "broadcast_btn_text": "👉 Register Now",  
     "channels": ["@channel1", "@channel2", "@channel3", "@channel4"], 
     "buttons": [
@@ -74,7 +74,7 @@ DEFAULT_SETTINGS = {
         {"text": "🎯 Claim bonus", "type": "url", "value": "https://t.me/telegram"},
         {"text": "💎 VIP GIFT", "type": "url", "value": "https://t.me/telegram"}
     ],
-    "users": {},
+    "users": {}, # {"user_id": {"joined": timestamp, "clicks": 0, "banned": False, "last_pin_id": message_id}}
     "clicks": {
         "total": 0,
         "button_wise": {
@@ -166,7 +166,6 @@ def generate_welcome_keyboard():
             
     markup.add(*grid_buttons)
     
-    # Bottom full-width verification button with dynamic text from database
     v_text = db.get("verification_btn_text", "🎁 Get My Free Code")
     markup.row(types.InlineKeyboardButton(text=v_text, callback_data="get_code"))
     return markup
@@ -175,7 +174,7 @@ def system_check(func):
     def wrapper(message):
         user_id = str(message.from_user.id)
         if user_id not in db["users"]:
-            db["users"][user_id] = {"joined": time.time(), "clicks": 0, "banned": False}
+            db["users"][user_id] = {"joined": time.time(), "clicks": 0, "banned": False, "last_pin_id": None}
             save_db(db)
         if db["users"][user_id].get("banned", False):
             return
@@ -382,7 +381,7 @@ def handle_admin_inputs(message):
 
     if text in ["⏩ Forward Broadcast", "📝 Copy Broadcast"]:
         admin_states[user_id] = f"broadcast_{'forward' if 'Forward' in text else 'copy'}"
-        bot.send_message(message.chat.id, f"📥 Send or forward any message/post now. Bot will auto-extract link and attach custom button! [Mode: {admin_states[user_id].upper()}]:")
+        bot.send_message(message.chat.id, f"📥 Send or forward any message/post now. Bot will auto-extract link, attach custom button, and handle AUTO-PIN sequence! [Mode: {admin_states[user_id].upper()}]:")
         return
         
     if text == "🔄 Reset URL Click Counter":
@@ -496,6 +495,7 @@ def handle_admin_inputs(message):
         status = bot.send_message(message.chat.id, f"⏳ Deploying transmission... Progress: 0/{total_targets}")
         success, failed = 0, 0
         
+        # LINK AUTO-EXTRACTION LOGIC
         source_text = message.text if message.content_type == 'text' else message.caption
         detected_link = extract_first_link(source_text)
         
@@ -506,20 +506,46 @@ def handle_admin_inputs(message):
             broadcast_markup.add(types.InlineKeyboardButton(text=btn_txt, url=detected_link, callback_data="dynamic_broadcast_click"))
         
         for idx, target_uid in enumerate(all_users, start=1):
+            user_str = str(target_uid)
+            
+            # Ensure the user dictionary has tracking fields structure safely
+            if user_str in db["users"] and not isinstance(db["users"][user_str], dict):
+                db["users"][user_str] = {"joined": time.time(), "clicks": 0, "banned": False, "last_pin_id": None}
+            elif user_str in db["users"]:
+                db["users"][user_str].setdefault("last_pin_id", None)
+
+            # 1. AUTO-UNPIN PREVIOUS MESSAGE LOGIC
+            old_pin_id = db["users"].get(user_str, {}).get("last_pin_id")
+            if old_pin_id:
+                try:
+                    bot.unpin_chat_message(target_uid, old_pin_id)
+                except Exception:
+                    pass # Shield if user cleared history or chat doesn't exist
+            
+            # 2. DISPATCH BROADCAST MESSAGE PAYLOAD
+            sent_msg = None
             try:
                 if mode == "forward":
-                    bot.forward_message(target_uid, message.chat.id, message.message_id)
+                    sent_msg = bot.forward_message(target_uid, message.chat.id, message.message_id)
                 else:
                     if message.content_type == 'text':
-                        bot.send_message(target_uid, message.text, reply_markup=broadcast_markup)
+                        sent_msg = bot.send_message(target_uid, message.text, reply_markup=broadcast_markup)
                     elif message.content_type == 'photo':
-                        bot.send_photo(target_uid, message.photo[-1].file_id, caption=message.caption, reply_markup=broadcast_markup)
+                        sent_msg = bot.send_photo(target_uid, message.photo[-1].file_id, caption=message.caption, reply_markup=broadcast_markup)
                     elif message.content_type == 'video':
-                        bot.send_video(target_uid, message.video.file_id, caption=message.caption, reply_markup=broadcast_markup)
+                        sent_msg = bot.send_video(target_uid, message.video.file_id, caption=message.caption, reply_markup=broadcast_markup)
                     elif message.content_type == 'document':
-                        bot.send_document(target_uid, message.document.file_id, caption=message.caption, reply_markup=broadcast_markup)
+                        sent_msg = bot.send_document(target_uid, message.document.file_id, caption=message.caption, reply_markup=broadcast_markup)
                     elif message.content_type == 'voice':
-                        bot.send_voice(target_uid, message.voice.file_id, caption=message.caption, reply_markup=broadcast_markup)
+                        sent_msg = bot.send_voice(target_uid, message.voice.file_id, caption=message.caption, reply_markup=broadcast_markup)
+                
+                # 3. AUTO-PIN NEW RECENT MESSAGE LOGIC
+                if sent_msg:
+                    try:
+                        bot.pin_chat_message(target_uid, sent_msg.message_id, disable_notification=False)
+                        db["users"][user_str]["last_pin_id"] = sent_msg.message_id
+                    except Exception:
+                        pass
                 success += 1
             except Exception:
                 failed += 1
@@ -531,13 +557,15 @@ def handle_admin_inputs(message):
                         f"👥 Total Target Baseline: <code>{total_targets}</code>\n"
                         f"✅ Sent Successfully: <code>{success}</code>\n"
                         f"❌ Failed Deliveries: <code>{failed}</code>\n"
-                        f"🔗 Link Extracted: <code>{detected_link if detected_link else 'No Link Found'}</code>",
+                        f"🔗 Link Extracted: <code>{detected_link if detected_link else 'No Link Found'}</code>\n"
+                        f"📌 Auto-Pin Status: <code>Active (Recent Post Pinned)</code>",
                         message.chat.id, status.message_id
                     )
                 except Exception: pass
             time.sleep(0.04)
             
-        bot.send_message(message.chat.id, "🏁 <b>Broadcast Delivery Pipeline Task Finished.</b>")
+        save_db(db) # Commit newly updated pin matrices seamlessly to state
+        bot.send_message(message.chat.id, "🏁 <b>Broadcast Delivery Pipeline Task Finished. All recent posts have been auto-pinned!</b>")
 
 if __name__ == "__main__":
     keep_alive()
