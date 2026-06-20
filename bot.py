@@ -292,4 +292,286 @@ def handle_admin_inputs(message):
     
     if text == "📊 Analytics & Stats":
         total_u = len(db["users"])
-        total_cl = db
+        total_cl = db["clicks"]["total"]
+        breakdown = ""
+        for k, v in db["clicks"]["button_wise"].items():
+            breakdown += f" 🔹 <i>{k}:</i> <code>{v}</code>\n"
+            
+        stats_msg = (
+            f"📊 <b>System Infrastructure Metrics:</b>\n\n"
+            f"👥 Total Registered Base Users: <code>{total_u}</code>\n"
+            f"🎯 Total Interaction Clicks: <code>{total_cl}</code>\n\n"
+            f"📈 <b>Button Tracking Analytics Grid:</b>\n{breakdown}"
+        )
+        bot.send_message(message.chat.id, stats_msg)
+        return
+        
+    if text == "🎚️ Maintenance Mode":
+        db["maintenance"] = not db.get("maintenance", False)
+        save_db(db)
+        state = "ENABLED 🛑" if db["maintenance"] else "DISABLED 🟢"
+        bot.send_message(message.chat.id, f"✅ Maintenance Mode is now {state}")
+        return
+
+    if text == "📸 Change Photo":
+        admin_states[user_id] = "awaiting_photo"
+        bot.send_message(message.chat.id, "📥 Send me the raw photo file or direct URL image path:")
+        return
+
+    if text == "✍️ Change Caption":
+        admin_states[user_id] = "awaiting_caption"
+        bot.send_message(message.chat.id, "📥 Send me the raw formatting text schema block:")
+        return
+
+    if text == "✏️ Edit Free Code Btn Text":
+        admin_states[user_id] = "awaiting_verification_btn_text"
+        bot.send_message(message.chat.id, f"📥 Current Text: <code>{db.get('verification_btn_text', '🎁 Get My Free Code')}</code>\nSend me the new text for the main verification button:")
+        return
+
+    if text == "✏️ Broadcast Button Text":
+        admin_states[user_id] = "awaiting_broadcast_btn_text"
+        bot.send_message(message.chat.id, f"📥 Current Text: <code>{db.get('broadcast_btn_text', '👉 Register Now')}</code>\nSend me the new name for the auto-extract link button:")
+        return
+        
+    if text == "🔗 Update Channels":
+        admin_states[user_id] = "awaiting_channels"
+        bot.send_message(message.chat.id, "📥 Send channels separated by space (e.g. <code>@ch1 @ch2 @ch3 @ch4</code>):")
+        return
+
+    if text == "➕ Add Welcome Button":
+        admin_states[user_id] = "add_btn_name"
+        bot.send_message(message.chat.id, "📥 Enter the text/name for the new button (e.g., <code>🔥 Join VIP</code>):")
+        return
+
+    if text == "✏️ Edit Button Text":
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        has_buttons = False
+        for idx, btn in enumerate(db["buttons"]):
+            markup.add(types.InlineKeyboardButton(text=f"✏️ {btn['text']}", callback_data=f"edit_name_{idx}"))
+            has_buttons = True
+        if has_buttons:
+            bot.send_message(message.chat.id, "📝 Select the button you want to rename:", reply_markup=markup)
+        else:
+            bot.send_message(message.chat.id, "ℹ️ No custom buttons found to edit.")
+        return
+
+    if text == "🔗 Edit Button URL":
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        has_buttons = False
+        for idx, btn in enumerate(db["buttons"]):
+            markup.add(types.InlineKeyboardButton(text=f"🔗 {btn['text']}", callback_data=f"edit_link_{idx}"))
+            has_buttons = True
+        if has_buttons:
+            bot.send_message(message.chat.id, "🔗 Select the button whose URL link you want to change:", reply_markup=markup)
+        else:
+            bot.send_message(message.chat.id, "ℹ️ No custom buttons found to edit.")
+        return
+
+    if text == "➖ Remove Welcome Button":
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        has_buttons = False
+        for idx, btn in enumerate(db["buttons"]):
+            markup.add(types.InlineKeyboardButton(text=f"❌ {btn['text']}", callback_data=f"del_btn_{idx}"))
+            has_buttons = True
+        if has_buttons:
+            bot.send_message(message.chat.id, "🗑️ Select the button you want to remove permanently:", reply_markup=markup)
+        else:
+            bot.send_message(message.chat.id, "ℹ️ No custom URL buttons found to delete.")
+        return
+
+    if text in ["⏩ Forward Broadcast", "📝 Copy Broadcast"]:
+        admin_states[user_id] = f"broadcast_{'forward' if 'Forward' in text else 'copy'}"
+        bot.send_message(message.chat.id, f"📥 Send or forward any message/post now. Bot will auto-extract link, attach custom button, and handle AUTO-PIN sequence! [Mode: {admin_states[user_id].upper()}]:")
+        return
+        
+    if text == "🔄 Reset URL Click Counter":
+        db["clicks"]["button_wise"]["dynamic_broadcast_link"] = 0
+        save_db(db)
+        bot.send_message(message.chat.id, "✅ URL Click counter has been reset to 0.")
+        return
+
+    if text == "⚙️ Default Configuration Settings":
+        db["welcome_photo"] = DEFAULT_SETTINGS["welcome_photo"]
+        db["welcome_caption"] = DEFAULT_SETTINGS["welcome_caption"]
+        db["buttons"] = DEFAULT_SETTINGS["buttons"]
+        db["broadcast_btn_text"] = DEFAULT_SETTINGS["broadcast_btn_text"]
+        db["verification_btn_text"] = DEFAULT_SETTINGS["verification_btn_text"]
+        db["clicks"]["total"] = 0
+        db["clicks"]["button_wise"] = {b["text"]: 0 for b in DEFAULT_SETTINGS["buttons"]}
+        db["clicks"]["button_wise"]["verification_button_click"] = 0
+        db["clicks"]["button_wise"]["dynamic_broadcast_link"] = 0
+        save_db(db)
+        bot.send_message(message.chat.id, "🔄 <b>Default Settings Restored Successfully!</b>")
+        return
+
+    # Process pending states
+    state = admin_states.get(user_id)
+    if not state: return
+    
+    if state == "awaiting_photo":
+        if message.content_type == 'photo':
+            db["welcome_photo"] = message.photo[-1].file_id
+        else:
+            db["welcome_photo"] = message.text
+        save_db(db)
+        bot.send_message(message.chat.id, "✅ Welcome Photo customized successfully!")
+        admin_states.pop(user_id, None)
+        
+    elif state == "awaiting_caption":
+        db["welcome_caption"] = message.text
+        save_db(db)
+        bot.send_message(message.chat.id, "✅ Caption Schema applied successfully!")
+        admin_states.pop(user_id, None)
+
+    elif state == "add_btn_name":
+        if message.content_type == 'text':
+            admin_states[user_id] = f"add_btn_url_{message.text.strip()}"
+            bot.send_message(message.chat.id, f"📥 Now send the full URL/Link for <b>{message.text.strip()}</b>:")
+        else: admin_states.pop(user_id, None)
+
+    elif state.startswith("add_btn_url_"):
+        btn_name = state.replace("add_btn_url_", "")
+        admin_states.pop(user_id, None)
+        if message.content_type == 'text' and (message.text.startswith("http://") or message.text.startswith("https://")):
+            db["buttons"].append({"text": btn_name, "type": "url", "value": message.text.strip()})
+            db["clicks"]["button_wise"][btn_name] = 0
+            save_db(db)
+            bot.send_message(message.chat.id, f"✅ New welcome button <b>{btn_name}</b> added successfully!")
+        else: bot.send_message(message.chat.id, "❌ Invalid Link! Cancelled.")
+
+    elif state.startswith("edit_btn_name_process_"):
+        btn_idx = int(state.split("_")[-1])
+        admin_states.pop(user_id, None)
+        if message.content_type == 'text':
+            old_name = db["buttons"][btn_idx]["text"]
+            new_name = message.text.strip()
+            db["buttons"][btn_idx]["text"] = new_name
+            if old_name in db["clicks"]["button_wise"]:
+                db["clicks"]["button_wise"][new_name] = db["clicks"]["button_wise"].pop(old_name)
+            save_db(db)
+            bot.send_message(message.chat.id, f"✅ Button text updated from <b>{old_name}</b> to <b>{new_name}</b> successfully!")
+
+    elif state.startswith("edit_btn_link_process_"):
+        btn_idx = int(state.split("_")[-1])
+        admin_states.pop(user_id, None)
+        if message.content_type == 'text' and (message.text.startswith("http://") or message.text.startswith("https://")):
+            db["buttons"][btn_idx]["value"] = message.text.strip()
+            save_db(db)
+            bot.send_message(message.chat.id, f"✅ Link for button <b>{db['buttons'][btn_idx]['text']}</b> updated successfully!")
+        else: bot.send_message(message.chat.id, "❌ Invalid URL! Aborted.")
+
+    elif state == "awaiting_verification_btn_text":
+        if message.content_type == 'text':
+            db["verification_btn_text"] = message.text.strip()
+            save_db(db)
+            bot.send_message(message.chat.id, f"✅ Verification button text updated to: <code>{message.text}</code>")
+        admin_states.pop(user_id, None)
+
+    elif state == "awaiting_broadcast_btn_text":
+        if message.content_type == 'text':
+            db["broadcast_btn_text"] = message.text.strip()
+            save_db(db)
+            bot.send_message(message.chat.id, f"✅ Auto link button text updated to: <code>{message.text}</code>")
+        admin_states.pop(user_id, None)
+        
+    elif state == "awaiting_channels":
+        parsed = [x.strip() for x in re.split(r'[\s,]+', message.text) if x.strip().startswith("@")]
+        db["channels"] = parsed
+        save_db(db)
+        bot.send_message(message.chat.id, f"✅ Force Join channels synced. Total channels: {len(parsed)}")
+        admin_states.pop(user_id, None)
+        
+    elif state.startswith("broadcast_"):
+        mode = state.split("_")[1]
+        admin_states.pop(user_id, None)
+        
+        all_users = list(db["users"].keys())
+        total_targets = len(all_users)
+        
+        if total_targets == 0:
+            bot.send_message(message.chat.id, "❌ Infrastructure user base array empty.")
+            return
+            
+        status = bot.send_message(message.chat.id, f"⏳ Deploying transmission... Progress: 0/{total_targets}")
+        success, failed = 0, 0
+        
+        # LINK AUTO-EXTRACTION LOGIC
+        source_text = message.text if message.content_type == 'text' else message.caption
+        detected_link = extract_first_link(source_text)
+        
+        broadcast_markup = None
+        if detected_link:
+            broadcast_markup = types.InlineKeyboardMarkup()
+            btn_txt = db.get("broadcast_btn_text", "👉 Register Now")
+            broadcast_markup.add(types.InlineKeyboardButton(text=btn_txt, url=detected_link, callback_data="dynamic_broadcast_click"))
+        
+        for idx, target_uid in enumerate(all_users, start=1):
+            user_str = str(target_uid)
+            
+            if user_str in db["users"] and not isinstance(db["users"][user_str], dict):
+                db["users"][user_str] = {"joined": time.time(), "clicks": 0, "banned": False, "last_pin_id": None}
+            elif user_str in db["users"]:
+                db["users"][user_str].setdefault("last_pin_id", None)
+
+            # 1. AUTO-UNPIN PREVIOUS MESSAGE LOGIC
+            old_pin_id = db["users"].get(user_str, {}).get("last_pin_id")
+            if old_pin_id:
+                try:
+                    bot.unpin_chat_message(target_uid, old_pin_id)
+                except Exception:
+                    pass
+            
+            # 2. DISPATCH BROADCAST MESSAGE PAYLOAD
+            sent_msg = None
+            try:
+                if mode == "forward":
+                    sent_msg = bot.forward_message(target_uid, message.chat.id, message.message_id)
+                else:
+                    if message.content_type == 'text':
+                        sent_msg = bot.send_message(target_uid, message.text, reply_markup=broadcast_markup)
+                    elif message.content_type == 'photo':
+                        sent_msg = bot.send_photo(target_uid, message.photo[-1].file_id, caption=message.caption, reply_markup=broadcast_markup)
+                    elif message.content_type == 'video':
+                        sent_msg = bot.send_video(target_uid, message.video.file_id, caption=message.caption, reply_markup=broadcast_markup)
+                    elif message.content_type == 'document':
+                        sent_msg = bot.send_document(target_uid, message.document.file_id, caption=message.caption, reply_markup=broadcast_markup)
+                    elif message.content_type == 'voice':
+                        sent_msg = bot.send_voice(target_uid, message.voice.file_id, caption=message.caption, reply_markup=broadcast_markup)
+                
+                # 3. AUTO-PIN NEW RECENT MESSAGE LOGIC
+                if sent_msg:
+                    try:
+                        bot.pin_chat_message(target_uid, sent_msg.message_id, disable_notification=False)
+                        db["users"][user_str]["last_pin_id"] = sent_msg.message_id
+                    except Exception:
+                        pass
+                success += 1
+            except Exception:
+                failed += 1
+                
+            if idx % 20 == 0 or idx == total_targets:
+                try:
+                    bot.edit_message_text(
+                        f"📢 <b>Mass Broadcast Transmission Logs:</b>\n\n"
+                        f"👥 Total Target Baseline: <code>{total_targets}</code>\n"
+                        f"✅ Sent Successfully: <code>{success}</code>\n"
+                        f"❌ Failed Deliveries: <code>{failed}</code>\n"
+                        f"🔗 Link Extracted: <code>{detected_link if detected_link else 'No Link Found'}</code>\n"
+                        f"📌 Auto-Pin Status: <code>Active (Recent Post Pinned)</code>",
+                        message.chat.id, status.message_id
+                    )
+                except Exception: pass
+            time.sleep(0.04)
+            
+        save_db(db)
+        bot.send_message(message.chat.id, "🏁 <b>Broadcast Delivery Pipeline Task Finished. All recent posts have been auto-pinned!</b>")
+
+if __name__ == "__main__":
+    keep_alive()
+    logger.info("Bot logic mapping loaded smoothly.")
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=0, timeout=90)
+        except Exception as err:
+            logger.error(f"Polling crash shielded event: {err}")
+            time.sleep(5)
