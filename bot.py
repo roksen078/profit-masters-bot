@@ -62,17 +62,17 @@ EXACT_WELCOME_TEXT = (
 DEFAULT_SETTINGS = {
     "admins": ADMINS,
     "maintenance": False,
-    "welcome_photo": "https://graph.org/file/f6e7c7a523ab65cb6fcd9.jpg", # Default banner link
+    "welcome_photo": "https://graph.org/file/f6e7c7a523ab65cb6fcd9.jpg", 
     "welcome_caption": EXACT_WELCOME_TEXT,
     "free_code_text": "🎁 MASTER-PROFIT-CODE-2026-X79",
-    "broadcast_btn_text": "👉 Register Now",  # Dynamic Extract Link button text managed by Admin
+    "verification_btn_text": "🎁 Get My Free Code", # Dynamic Verification Button text managed by Admin
+    "broadcast_btn_text": "👉 Register Now",  
     "channels": ["@channel1", "@channel2", "@channel3", "@channel4"], 
     "buttons": [
         {"text": "🚀 Claim ₹500", "type": "url", "value": "https://t.me/telegram"},
         {"text": "🎁 Unlock Code", "type": "url", "value": "https://t.me/telegram"},
         {"text": "🎯 Claim bonus", "type": "url", "value": "https://t.me/telegram"},
-        {"text": "💎 VIP GIFT", "type": "url", "value": "https://t.me/telegram"},
-        {"text": "🎁 Get My Free Code", "type": "callback", "value": "get_code"}
+        {"text": "💎 VIP GIFT", "type": "url", "value": "https://t.me/telegram"}
     ],
     "users": {},
     "clicks": {
@@ -82,7 +82,7 @@ DEFAULT_SETTINGS = {
             "🎁 Unlock Code": 0,
             "🎯 Claim bonus": 0,
             "💎 VIP GIFT": 0,
-            "🎁 Get My Free Code": 0,
+            "verification_button_click": 0,
             "dynamic_broadcast_link": 0
         }
     }
@@ -120,7 +120,6 @@ def save_db(data):
 
 db = load_db()
 
-# Sync admins on initialization
 for adm in ADMINS:
     if adm not in db["admins"]:
         db["admins"].append(adm)
@@ -159,7 +158,7 @@ def generate_welcome_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=2)
     grid_buttons = []
     
-    for btn in db["buttons"][:-1]:
+    for btn in db["buttons"]:
         if btn["type"] == "url":
             grid_buttons.append(types.InlineKeyboardButton(text=btn["text"], url=btn["value"]))
         else:
@@ -167,8 +166,9 @@ def generate_welcome_keyboard():
             
     markup.add(*grid_buttons)
     
-    last_btn = db["buttons"][-1]
-    markup.row(types.InlineKeyboardButton(text=last_btn["text"], callback_data=last_btn["value"]))
+    # Bottom full-width verification button with dynamic text from database
+    v_text = db.get("verification_btn_text", "🎁 Get My Free Code")
+    markup.row(types.InlineKeyboardButton(text=v_text, callback_data="get_code"))
     return markup
 
 def system_check(func):
@@ -205,10 +205,9 @@ def query_router(call):
     chat_id = call.message.chat.id
     
     if call.data == "get_code":
-        record_click("🎁 Get My Free Code", user_id)
+        record_click("verification_button_click", user_id)
         bot.answer_callback_query(call.id, "🔐 Verifying membership protocols...")
         
-        # SCREENSHOT 2 EXACT ANIMATION STRINGS
         prog_msg = bot.send_message(
             chat_id, 
             "⏳ <b>Verification in Progress...</b>\n\n"
@@ -217,11 +216,9 @@ def query_router(call):
         )
         
         time.sleep(5.0)
-        
         try:
             bot.delete_message(chat_id, prog_msg.message_id)
-        except Exception:
-            pass
+        except Exception: pass
             
         if check_force_join(user_id):
             success_txt = (
@@ -230,7 +227,6 @@ def query_router(call):
             )
             bot.send_message(chat_id, success_txt)
         else:
-            # SCREENSHOT 3 EXACT ERROR STRINGS
             error_txt = (
                 "⚠️ <b>Aapne Join Nahi Kiya!</b>\n\n"
                 "Kripaya upar diye gaye 4 channels join karein.\n\n"
@@ -244,6 +240,33 @@ def query_router(call):
         bot.answer_callback_query(call.id, "Redirecting to your destination...")
         return
 
+    if call.data.startswith("del_btn_"):
+        if not is_admin(user_id): return
+        btn_index = int(call.data.split("_")[2])
+        try:
+            removed_btn = db["buttons"].pop(btn_index)
+            save_db(db)
+            bot.edit_message_text(f"✅ Button <b>{removed_btn['text']}</b> permanently deleted!", chat_id, call.message.message_id)
+        except Exception as e:
+            bot.answer_callback_query(call.id, f"❌ Error: {e}", show_alert=True)
+        return
+
+    if call.data.startswith("edit_name_"):
+        if not is_admin(user_id): return
+        btn_index = int(call.data.split("_")[2])
+        admin_states[user_id] = f"edit_btn_name_process_{btn_index}"
+        bot.send_message(chat_id, f"📥 Send me the new name/text for button <b>{db['buttons'][btn_index]['text']}</b>:")
+        bot.answer_callback_query(call.id)
+        return
+
+    if call.data.startswith("edit_link_"):
+        if not is_admin(user_id): return
+        btn_index = int(call.data.split("_")[2])
+        admin_states[user_id] = f"edit_btn_link_process_{btn_index}"
+        bot.send_message(chat_id, f"📥 Send me the new URL/Link for button <b>{db['buttons'][btn_index]['text']}</b>:")
+        bot.answer_callback_query(call.id)
+        return
+
 # --- PRIVATE ADMIN MATRIX LAYER ---
 admin_states = {}
 
@@ -255,8 +278,11 @@ def admin_menu(message):
     markup.row("📊 Analytics & Stats", "⚙️ Default Configuration Settings")
     markup.row("⏩ Forward Broadcast", "📝 Copy Broadcast")
     markup.row("📸 Change Photo", "✍️ Change Caption")
-    markup.row("✏️ Broadcast Button Text", "🔗 Update Channels")
-    markup.row("🎚️ Maintenance Mode", "🔄 Reset URL Click Counter")
+    markup.row("➕ Add Welcome Button", "✏️ Edit Button Text")
+    markup.row("🔗 Edit Button URL", "➖ Remove Welcome Button")
+    markup.row("✏️ Edit Free Code Btn Text", "✏️ Broadcast Button Text")
+    markup.row("🔗 Update Channels", "🎚️ Maintenance Mode")
+    markup.row("🔄 Reset URL Click Counter", "")
     
     bot.send_message(message.chat.id, "👨‍💼 <b>System Control Center Node Activated:</b>", reply_markup=markup)
 
@@ -298,6 +324,11 @@ def handle_admin_inputs(message):
         bot.send_message(message.chat.id, "📥 Send me the raw formatting text schema block:")
         return
 
+    if text == "✏️ Edit Free Code Btn Text":
+        admin_states[user_id] = "awaiting_verification_btn_text"
+        bot.send_message(message.chat.id, f"📥 Current Text: <code>{db.get('verification_btn_text', '🎁 Get My Free Code')}</code>\nSend me the new text for the main verification button:")
+        return
+
     if text == "✏️ Broadcast Button Text":
         admin_states[user_id] = "awaiting_broadcast_btn_text"
         bot.send_message(message.chat.id, f"📥 Current Text: <code>{db.get('broadcast_btn_text', '👉 Register Now')}</code>\nSend me the new name for the auto-extract link button:")
@@ -306,6 +337,47 @@ def handle_admin_inputs(message):
     if text == "🔗 Update Channels":
         admin_states[user_id] = "awaiting_channels"
         bot.send_message(message.chat.id, "📥 Send channels separated by space (e.g. <code>@ch1 @ch2 @ch3 @ch4</code>):")
+        return
+
+    if text == "➕ Add Welcome Button":
+        admin_states[user_id] = "add_btn_name"
+        bot.send_message(message.chat.id, "📥 Enter the text/name for the new button (e.g., <code>🔥 Join VIP</code>):")
+        return
+
+    if text == "✏️ Edit Button Text":
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        has_buttons = False
+        for idx, btn in enumerate(db["buttons"]):
+            markup.add(types.InlineKeyboardButton(text=f"✏️ {btn['text']}", callback_data=f"edit_name_{idx}"))
+            has_buttons = True
+        if has_buttons:
+            bot.send_message(message.chat.id, "📝 Select the button you want to rename:", reply_markup=markup)
+        else:
+            bot.send_message(message.chat.id, "ℹ️ No custom buttons found to edit.")
+        return
+
+    if text == "🔗 Edit Button URL":
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        has_buttons = False
+        for idx, btn in enumerate(db["buttons"]):
+            markup.add(types.InlineKeyboardButton(text=f"🔗 {btn['text']}", callback_data=f"edit_link_{idx}"))
+            has_buttons = True
+        if has_buttons:
+            bot.send_message(message.chat.id, "🔗 Select the button whose URL link you want to change:", reply_markup=markup)
+        else:
+            bot.send_message(message.chat.id, "ℹ️ No custom buttons found to edit.")
+        return
+
+    if text == "➖ Remove Welcome Button":
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        has_buttons = False
+        for idx, btn in enumerate(db["buttons"]):
+            markup.add(types.InlineKeyboardButton(text=f"❌ {btn['text']}", callback_data=f"del_btn_{idx}"))
+            has_buttons = True
+        if has_buttons:
+            bot.send_message(message.chat.id, "🗑️ Select the button you want to remove permanently:", reply_markup=markup)
+        else:
+            bot.send_message(message.chat.id, "ℹ️ No custom URL buttons found to delete.")
         return
 
     if text in ["⏩ Forward Broadcast", "📝 Copy Broadcast"]:
@@ -324,8 +396,10 @@ def handle_admin_inputs(message):
         db["welcome_caption"] = DEFAULT_SETTINGS["welcome_caption"]
         db["buttons"] = DEFAULT_SETTINGS["buttons"]
         db["broadcast_btn_text"] = DEFAULT_SETTINGS["broadcast_btn_text"]
+        db["verification_btn_text"] = DEFAULT_SETTINGS["verification_btn_text"]
         db["clicks"]["total"] = 0
         db["clicks"]["button_wise"] = {b["text"]: 0 for b in DEFAULT_SETTINGS["buttons"]}
+        db["clicks"]["button_wise"]["verification_button_click"] = 0
         db["clicks"]["button_wise"]["dynamic_broadcast_link"] = 0
         save_db(db)
         bot.send_message(message.chat.id, "🔄 <b>Default Settings Restored Successfully!</b>")
@@ -348,6 +422,50 @@ def handle_admin_inputs(message):
         db["welcome_caption"] = message.text
         save_db(db)
         bot.send_message(message.chat.id, "✅ Caption Schema applied successfully!")
+        admin_states.pop(user_id, None)
+
+    elif state == "add_btn_name":
+        if message.content_type == 'text':
+            admin_states[user_id] = f"add_btn_url_{message.text.strip()}"
+            bot.send_message(message.chat.id, f"📥 Now send the full URL/Link for <b>{message.text.strip()}</b>:")
+        else: admin_states.pop(user_id, None)
+
+    elif state.startswith("add_btn_url_"):
+        btn_name = state.replace("add_btn_url_", "")
+        admin_states.pop(user_id, None)
+        if message.content_type == 'text' and (message.text.startswith("http://") or message.text.startswith("https://")):
+            db["buttons"].append({"text": btn_name, "type": "url", "value": message.text.strip()})
+            db["clicks"]["button_wise"][btn_name] = 0
+            save_db(db)
+            bot.send_message(message.chat.id, f"✅ New welcome button <b>{btn_name}</b> added successfully!")
+        else: bot.send_message(message.chat.id, "❌ Invalid Link! Cancelled.")
+
+    elif state.startswith("edit_btn_name_process_"):
+        btn_idx = int(state.split("_")[-1])
+        admin_states.pop(user_id, None)
+        if message.content_type == 'text':
+            old_name = db["buttons"][btn_idx]["text"]
+            new_name = message.text.strip()
+            db["buttons"][btn_idx]["text"] = new_name
+            if old_name in db["clicks"]["button_wise"]:
+                db["clicks"]["button_wise"][new_name] = db["clicks"]["button_wise"].pop(old_name)
+            save_db(db)
+            bot.send_message(message.chat.id, f"✅ Button text updated from <b>{old_name}</b> to <b>{new_name}</b> successfully!")
+
+    elif state.startswith("edit_btn_link_process_"):
+        btn_idx = int(state.split("_")[-1])
+        admin_states.pop(user_id, None)
+        if message.content_type == 'text' and (message.text.startswith("http://") or message.text.startswith("https://")):
+            db["buttons"][btn_idx]["value"] = message.text.strip()
+            save_db(db)
+            bot.send_message(message.chat.id, f"✅ Link for button <b>{db['buttons'][btn_idx]['text']}</b> updated successfully!")
+        else: bot.send_message(message.chat.id, "❌ Invalid URL! Aborted.")
+
+    elif state == "awaiting_verification_btn_text":
+        if message.content_type == 'text':
+            db["verification_btn_text"] = message.text.strip()
+            save_db(db)
+            bot.send_message(message.chat.id, f"✅ Verification button text updated to: <code>{message.text}</code>")
         admin_states.pop(user_id, None)
 
     elif state == "awaiting_broadcast_btn_text":
@@ -378,7 +496,6 @@ def handle_admin_inputs(message):
         status = bot.send_message(message.chat.id, f"⏳ Deploying transmission... Progress: 0/{total_targets}")
         success, failed = 0, 0
         
-        # LINK AUTO-EXTRACTION LOGIC
         source_text = message.text if message.content_type == 'text' else message.caption
         detected_link = extract_first_link(source_text)
         
@@ -417,8 +534,7 @@ def handle_admin_inputs(message):
                         f"🔗 Link Extracted: <code>{detected_link if detected_link else 'No Link Found'}</code>",
                         message.chat.id, status.message_id
                     )
-                except Exception: 
-                    pass
+                except Exception: pass
             time.sleep(0.04)
             
         bot.send_message(message.chat.id, "🏁 <b>Broadcast Delivery Pipeline Task Finished.</b>")
