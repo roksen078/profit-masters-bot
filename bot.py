@@ -35,7 +35,7 @@ def keep_alive():
     server.start()
 
 # --- BOT SETUP & DB ENGINE ---
-BOT_TOKEN = os.environ.get("8801329011:AAFHyt2KqMwTQ_y_m8aO28wsdGy9raKEWss"")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 ADMIN_ID_ENV = os.environ.get("ADMIN_ID", "6191773010")
 
 try:
