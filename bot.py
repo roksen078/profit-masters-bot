@@ -7,7 +7,7 @@ import random
 import json  # Permanent database file ke liye
 
 # --- CONFIGURATION & INITIALIZATION ---
-TOKEN = os.getenv("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN", "8801329011:AAFHyt2KqMwTQ_y_m8aO28wsdGy9raKEWss")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
