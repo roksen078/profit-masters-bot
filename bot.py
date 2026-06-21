@@ -25,6 +25,7 @@ DEFAULT_SETTINGS = {
     "broadcast_btn_text": "👉 Register Now", 
     "verification_delay_enabled": True, 
     "verification_text": "⏳ Processing your request... Please wait 5 seconds.", 
+    "error_text": "<b>⚠️ Aapne Join Nahi Kiya!</b>\n\nKripaya upar diye gaye channels join karein.\n\n📌 <b>Zaruri:</b> Channels ko Pin karke rakho, tabhi code milega!",
     "custom_buttons": [
         {"text": "🚀 Claim ₹500", "url": "https://t.me/telegram"},
         {"text": "🎁 Unlock Code", "url": "https://t.me/telegram"},
@@ -94,6 +95,7 @@ STATE_ADD_BTN_NAME = "ADD_BTN_NAME"
 STATE_ADD_BTN_URL = "ADD_BTN_URL"
 STATE_EDIT_FREE_BTN = "EDIT_FREE_BTN"
 STATE_EDIT_VERIFY_TEXT = "EDIT_VERIFY_TEXT"
+STATE_EDIT_ERROR_TEXT = "EDIT_ERROR_TEXT"  # New state active
 STATE_UPDATE_CHANNELS = "UPDATE_CHANNELS"
 STATE_BROADCAST_TEXT = "STATE_BROADCAST_TEXT"
 STATE_FORWARD_BROADCAST = "FORWARD_BROADCAST"
@@ -145,6 +147,7 @@ def get_admin_keyboard():
     markup.add(
         KeyboardButton(delay_status),
         KeyboardButton("⏳ Edit Verification Text"),
+        KeyboardButton("📝 Edit Join Error Text"),  # New Admin Button added here
         KeyboardButton("📥 Export Users Data")
     )
     return markup
@@ -212,11 +215,8 @@ def handle_reward_claim(call):
                 except Exception:
                     pass
                 
-                error_msg = (
-                    "<b>⚠️ Aapne Join Nahi Kiya!</b>\n\n"
-                    "Kripaya upar diye gaye channels join karein.\n\n"
-                    "📌 <b>Zaruri:</b> Channels ko Pin karke rakho, tabhi code milega!"
-                )
+                # Dynamic error string pulled safely from JSON matrix
+                error_msg = sys_db.get("error_text", "<b>⚠️ Aapne Join Nahi Kiya!</b>")
                 bot.send_message(chat_id, error_msg, parse_mode="HTML")
                 return
 
@@ -234,11 +234,7 @@ def handle_reward_claim(call):
         
     else:
         if not check_user_joined_all(user_id):
-            error_msg = (
-                "<b>⚠️ Aapne Join Nahi Kiya!</b>\n\n"
-                "Kripaya upar diye gaye channels join karein.\n\n"
-                "📌 <b>Zaruri:</b> Channels ko Pin karke rakho, tabhi code milega!"
-            )
+            error_msg = sys_db.get("error_text", "<b>⚠️ Aapne Join Nahi Kiya!</b>")
             bot.send_message(chat_id, error_msg, parse_mode="HTML")
             return
 
@@ -290,6 +286,11 @@ def handle_admin_inputs(message):
     elif text == "⏳ Edit Verification Text":
         admin_states[user_id] = STATE_EDIT_VERIFY_TEXT
         bot.send_message(message.chat.id, f"📥 Send me the new text loader string:\n\n<b>Current:</b> <code>{sys_db.get('verification_text')}</code>", parse_mode="HTML")
+        return
+
+    elif text == "📝 Edit Join Error Text":
+        admin_states[user_id] = STATE_EDIT_ERROR_TEXT
+        bot.send_message(message.chat.id, f"📥 Send me the new HTML Join Error text:\n\n<b>Current:</b>\n{sys_db.get('error_text', 'None')}", parse_mode="HTML")
         return
 
     elif text == "📥 Export Users Data":
@@ -384,7 +385,7 @@ def handle_admin_inputs(message):
         return
 
     elif text == "📝 Broadcast Button Text":
-        admin_states[user_id] = STATE_BROADCAST_TEXT  # 🟢 Fixed Mapping flow control lock here
+        admin_states[user_id] = STATE_BROADCAST_TEXT  # Perfectly mapped control sequence link
         bot.send_message(message.chat.id, f"📥 Send me the text for the broadcast link button:\n\n<b>Current:</b> {sys_db.get('broadcast_btn_text', '👉 Register Now')}")
         return
 
@@ -397,7 +398,6 @@ def handle_admin_inputs(message):
     if state in [STATE_FORWARD_BROADCAST, STATE_COPY_BROADCAST]:
         admin_states[user_id] = STATE_NONE
         
-        # Taking a thread-safe static snapshot list of users to avoid data race condition
         with db_lock:
             target_users_snapshot = list(sys_db["users"])
             
@@ -461,6 +461,13 @@ def handle_admin_inputs(message):
         save_system_data(sys_db)
         admin_states[user_id] = STATE_NONE
         bot.send_message(message.chat.id, "✅ Verification text customized successfully!", reply_markup=get_admin_keyboard())
+        return
+
+    elif state == STATE_EDIT_ERROR_TEXT:
+        sys_db["error_text"] = text
+        save_system_data(sys_db)
+        admin_states[user_id] = STATE_NONE
+        bot.send_message(message.chat.id, "✅ Join Error Text customized live successfully!", reply_markup=get_admin_keyboard())
         return
 
     elif state == STATE_EDIT_PHOTO:
