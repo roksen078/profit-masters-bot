@@ -4,7 +4,7 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 from flask import Flask
 import threading
 import random
-import json
+import json  # Permanent database file ke liye
 
 # --- CONFIGURATION & INITIALIZATION ---
 TOKEN = os.getenv("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
@@ -13,9 +13,9 @@ app = Flask(__name__)
 
 DB_FILE = "users_db.json"
 
-# --- JSON DATABASE UTILITIES (PERMANENT PROTOCOLS) ---
+# --- JSON DATABASE UTILITIES (PERMANENT STORAGE) ---
 def load_users():
-    """File se storage matrix data load karne ke liye"""
+    """File se registered users ka data safe load karne ke liye"""
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r") as f:
@@ -26,7 +26,7 @@ def load_users():
     return set()
 
 def save_user_to_db(user_id):
-    """Naye distinct users data append registry"""
+    """Naye users ko permanent file me safe append karne ke liye"""
     users = load_users()
     if user_id not in users:
         users.add(user_id)
@@ -34,9 +34,9 @@ def save_user_to_db(user_id):
             with open(DB_FILE, "w") as f:
                 json.dump({"users": list(users)}, f)
         except Exception as e:
-            print(f"Error saving database structure: {e}")
+            print(f"Error saving database: {e}")
 
-# --- SYSTEM DATA MATRIX ---
+# --- SYSTEM DATA MATRIX (100% SAME AS YOUR ORIGINAL) ---
 db = {
     "maintenance": False,
     "welcome_photo": "https://placehold.co/600x400/png", 
@@ -95,14 +95,17 @@ def check_user_joined_all(user_id):
 # --- REBUILD DYNAMIC REPLIES PANEL ---
 def get_admin_keyboard():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    # 100% SAME AS YOUR ORIGINAL SCREENSHOT MENU
     markup.add(
         KeyboardButton("📊 Analytics & Stats"),
-        KeyboardButton("📥 Export Users Data"),
+        KeyboardButton("⚙️ Default Configuration Settings"),
         KeyboardButton("⏩ Forward Broadcast"),
         KeyboardButton("📝 Copy Broadcast"),
         KeyboardButton("📸 Change Photo"),
         KeyboardButton("✍️ Change Caption"),
         KeyboardButton("+ Add Welcome Button"),
+        KeyboardButton("📝 Edit Button Text"),
+        KeyboardButton("🔗 Edit Button URL"),
         KeyboardButton("- Remove Welcome Button"),
         KeyboardButton("📝 Edit Free Code Btn Text"),
         KeyboardButton("📝 Broadcast Button Text"),
@@ -111,10 +114,12 @@ def get_admin_keyboard():
         KeyboardButton("🔄 Reset URL Click Counter")
     )
     
+    # 🌟 AAPKE CONTROLS EKDOM NEECHE ALAG SE ADJUST HAIN
     delay_status = "🟢 Delay Status: ON" if db.get("verification_delay_enabled", True) else "🔴 Delay Status: OFF"
     markup.add(
         KeyboardButton(delay_status),
-        KeyboardButton("⏳ Edit Verification Text")
+        KeyboardButton("⏳ Edit Verification Text"),
+        KeyboardButton("📥 Export Users Data")
     )
     return markup
 
@@ -122,14 +127,18 @@ def get_admin_keyboard():
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
-    save_user_to_db(user_id)
+    save_user_to_db(user_id) # background me ID auto permanent save ho jayegi
     
     if db.get("maintenance", False) and not is_admin(user_id):
         return
         
+    # Layout perfectly maintained: Pehle 4 custom buttons rows me, fir niche free code wala
     markup = InlineKeyboardMarkup(row_width=2)
-    for btn in db["custom_buttons"]:
-        markup.add(InlineKeyboardButton(text=btn["text"], url=btn["url"]))
+    
+    btns_list = [InlineKeyboardButton(text=btn["text"], url=btn["url"]) for btn in db["custom_buttons"]]
+    for i in range(0, len(btns_list), 2):
+        markup.row(*btns_list[i:i+2])
+        
     markup.add(InlineKeyboardButton(text=db["free_code_btn_text"], callback_data="get_free_code"))
     
     try:
@@ -155,7 +164,7 @@ def admin_panel(message):
     admin_states[message.from_user.id] = STATE_NONE
     bot.send_message(message.chat.id, "🛠 *Profit Masters Administrative Control Console:*", parse_mode="Markdown", reply_markup=get_admin_keyboard())
 
-# --- USER TELEGRAM ACTION EXECUTOR (NON-BLOCKING) ---
+# --- USER TELEGRAM ACTION EXECUTOR (NON-BLOCKING PARALLEL TIMERS) ---
 @bot.callback_query_handler(func=lambda call: call.data == "get_free_code")
 def handle_reward_claim(call):
     user_id = call.from_user.id
@@ -175,6 +184,7 @@ def handle_reward_claim(call):
     if db.get("verification_delay_enabled", True):
         status_msg = bot.send_message(chat_id, db.get("verification_text", "⏳ Processing..."))
         
+        # Is thread logic se doosre users 1 second ke liye bhi freeze nahi hote
         def send_code_delayed():
             generated_code = f"IW7-PROMO-{random.randint(100000, 999999)}"
             try:
@@ -195,7 +205,6 @@ def handle_admin_inputs(message):
     text = message.text if message.content_type == 'text' else ""
     state = admin_states.get(user_id, STATE_NONE)
     
-    # Core Controls Command Routing
     if text == "🎚️ Maintenance Mode":
         db["maintenance"] = not db["maintenance"]
         status = "ENABLED 🛑" if db["maintenance"] else "DISABLED 🟢"
@@ -204,8 +213,8 @@ def handle_admin_inputs(message):
 
     elif text.startswith("🟢 Delay Status:") or text.startswith("🔴 Delay Status:"):
         db["verification_delay_enabled"] = not db["verification_delay_enabled"]
-        status = "ENABLED 🟢 (5 Sec Delay Active)" if db["verification_delay_enabled"] else "DISABLED 🔴 (Instant Mode Active)"
-        bot.send_message(message.chat.id, f"✅ Verification Delay status variable updated to: <b>{status}</b>", parse_mode="HTML", reply_markup=get_admin_keyboard())
+        status = "ENABLED 🟢" if db["verification_delay_enabled"] else "DISABLED 🔴"
+        bot.send_message(message.chat.id, f"✅ Verification Delay is now {status}.", reply_markup=get_admin_keyboard())
         return
 
     elif text == "⏳ Edit Verification Text":
@@ -213,6 +222,7 @@ def handle_admin_inputs(message):
         bot.send_message(message.chat.id, f"📥 Send me the new text loader string:\n\n<b>Current:</b> <code>{db.get('verification_text')}</code>", parse_mode="HTML")
         return
 
+    # ✨ 1-CLICK DATA EXPORT CODE
     elif text == "📥 Export Users Data":
         users = load_users()
         total_users = len(users)
@@ -229,15 +239,10 @@ def handle_admin_inputs(message):
             bot.send_document(
                 chat_id=message.chat.id,
                 document=f,
-                caption=f"📊 <b>Profit Masters Database Backup File</b>\n\n👥 Total Users Saved: <code>{total_users}</code>\n\n💡 <i>Tip: Is file ko hamesha safe rakhna, ye aapke real users hain.</i>",
+                caption=f"📊 <b>Profit Masters User Database Backup</b>\n\n👥 Total Unique Users: <code>{total_users}</code>\n\n💡 <i>Is file ko safe rakhein, isme aapke saare active users ki Telegram IDs hain!</i>",
                 parse_mode="HTML"
             )
-        
-        if total_users < 200:
-            ids_string = ", ".join(str(uid) for uid in users)
-            bot.send_message(message.chat.id, f"📝 <b>Text ID Backup:</b>\n<code>{ids_string}</code>", parse_mode="HTML")
-            
-        os.remove(file_name)
+        os.remove(file_name) # Server clean setup
         return
 
     elif text == "⏩ Forward Broadcast":
@@ -252,12 +257,12 @@ def handle_admin_inputs(message):
 
     elif text == "📸 Change Photo":
         admin_states[user_id] = STATE_EDIT_PHOTO
-        bot.send_message(message.chat.id, "📥 Send me the new photo raw link or address path:")
+        bot.send_message(message.chat.id, "📥 Send me the new photo URL:")
         return
 
     elif text == "✍️ Change Caption":
         admin_states[user_id] = STATE_EDIT_CAPTION
-        bot.send_message(message.chat.id, "📥 Send me the new HTML text layout block:")
+        bot.send_message(message.chat.id, "📥 Send me the new HTML caption:")
         return
 
     elif text == "📊 Analytics & Stats":
@@ -332,17 +337,17 @@ def handle_admin_inputs(message):
     elif state == STATE_EDIT_VERIFY_TEXT:
         db["verification_text"] = text
         admin_states[user_id] = STATE_NONE
-        bot.send_message(message.chat.id, "✅ Verification active loader text customized successfully!", reply_markup=get_admin_keyboard())
+        bot.send_message(message.chat.id, "✅ Verification text customized successfully!", reply_markup=get_admin_keyboard())
         
     elif state == STATE_EDIT_PHOTO:
         db["welcome_photo"] = text
         admin_states[user_id] = STATE_NONE
-        bot.send_message(message.chat.id, "✅ Welcome Photo path synchronized successfully!", reply_markup=get_admin_keyboard())
+        bot.send_message(message.chat.id, "✅ Welcome Photo updated!", reply_markup=get_admin_keyboard())
         
     elif state == STATE_EDIT_CAPTION:
         db["welcome_caption"] = text
         admin_states[user_id] = STATE_NONE
-        bot.send_message(message.chat.id, "✅ Welcome Message Content applied successfully!", reply_markup=get_admin_keyboard())
+        bot.send_message(message.chat.id, "✅ Welcome Caption updated!", reply_markup=get_admin_keyboard())
 
     elif state == STATE_ADD_BTN_NAME:
         temp_btn_data[user_id] = {"text": text}
@@ -387,7 +392,7 @@ def handle_button_deletion(call):
     except Exception:
         bot.answer_callback_query(call.id, "Error in processing deletion.")
 
-# --- FLASK BACKGROUND PROCESS CORE ---
+# --- FLASK ALIVE SYSTEM ---
 @app.route('/')
 def home():
     return "🚀 System Operational: Profit Masters V3 Core Online!", 200
@@ -397,5 +402,4 @@ def run_flask():
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
-    print("🤖 Production client processing actively online on Render instance hooks...")
     bot.polling(none_stop=True)
