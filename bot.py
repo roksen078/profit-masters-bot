@@ -8,11 +8,12 @@ import json
 import re  # Text se automatic link extract karne ke liye
 
 # --- CONFIGURATION & INITIALIZATION ---
-TOKEN = os.getenv("BOT_TOKEN", "8801329011:AAFHyt2KqMwTQ_y_m8aO28wsdGy9raKEWss")
+TOKEN = os.getenv("BOT_TOKEN", "8313028390:AAF_6FaXiLndJSvAmSt8Zhc1v1R_Wilssp0")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 DB_FILE = "users_db.json"
+db_lock = threading.Lock()  # Prevent multi-user write collisions
 
 # --- SYSTEM SETTINGS DEFAULT MATRIX ---
 DEFAULT_SETTINGS = {
@@ -21,7 +22,7 @@ DEFAULT_SETTINGS = {
     "welcome_photo": "https://placehold.co/600x400/png", 
     "welcome_caption": "🎉 <b>Welcome to Profit Masters!</b>\n\n🎁 Your signup bonus is ready.\n👇 Join channels and click verify.",
     "free_code_btn_text": "🎁 Get My Free Code",
-    "broadcast_btn_text": "👉 Register Now", # Runtime dynamic set se link hai
+    "broadcast_btn_text": "👉 Register Now", 
     "verification_delay_enabled": True, 
     "verification_text": "⏳ Processing your request... Please wait 5 seconds.", 
     "custom_buttons": [
@@ -34,7 +35,7 @@ DEFAULT_SETTINGS = {
     "url_clicks": 0
 }
 
-# --- UNIFIED JSON DATABASE UTILITIES (PERMANENT SYSTEM CONFIG) ---
+# --- UNIFIED JSON DATABASE UTILITIES (CRASH-PROOF HARD HARD PROTECTION) ---
 def load_system_data():
     if os.path.exists(DB_FILE):
         try:
@@ -49,22 +50,39 @@ def load_system_data():
     return DEFAULT_SETTINGS.copy()
 
 def save_system_data(data):
-    try:
-        if "users" in data and isinstance(data["users"], set):
-            data["users"] = list(data["users"])
-        with open(DB_FILE, "w") as f:
-            json.dump(data, f, indent=4)
-    except Exception as e:
-        print(f"Database core structural save failure error: {e}")
+    with db_lock:  # Multi-threading lock protection active
+        try:
+            data_copy = data.copy()
+            # Force conversion to list before JSON dumps to avoid type errors
+            if "users" in data_copy:
+                if isinstance(data_copy["users"], set):
+                    data_copy["users"] = list(data_copy["users"])
+                elif not isinstance(data_copy["users"], list):
+                    data_copy["users"] = []
+            with open(DB_FILE, "w") as f:
+                json.dump(data_copy, f, indent=4)
+        except Exception as e:
+            print(f"Database core structural save failure error: {e}")
 
 sys_db = load_system_data()
-if isinstance(sys_db["users"], list):
+
+# Strictly verify and lock 'users' as a set in system memory to avoid .add() error
+if "users" not in sys_db or not isinstance(sys_db["users"], (list, set)):
+    sys_db["users"] = set()
+else:
     sys_db["users"] = set(sys_db["users"])
 
 def save_user_to_db(user_id):
-    if user_id not in sys_db["users"]:
-        sys_db["users"].add(user_id)
-        save_system_data(sys_db)
+    try:
+        # Extra safety layer: Ensure sys_db['users'] is indeed a set at runtime
+        if not isinstance(sys_db["users"], set):
+            sys_db["users"] = set(sys_db["users"])
+            
+        if user_id not in sys_db["users"]:
+            sys_db["users"].add(user_id)
+            save_system_data(sys_db)
+    except Exception as e:
+        print(f"User registration safely bypassed to maintain connection: {e}")
 
 ADMIN_ID = 1908832842  
 
@@ -178,18 +196,16 @@ def admin_panel(message):
     admin_states[message.from_user.id] = STATE_NONE
     bot.send_message(message.chat.id, "🛠 *Profit Masters Administrative Control Console:*", parse_mode="Markdown", reply_markup=get_admin_keyboard())
 
-# --- USER SYSTEM RUNTIME CALLBACK INTERCEPTOR (FIXED OVERRIDE LOGIC) ---
+# --- USER SYSTEM RUNTIME CALLBACK INTERCEPTOR ---
 @bot.callback_query_handler(func=lambda call: call.data == "get_free_code")
 def handle_reward_claim(call):
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     
-    # 🌟 NEW LOGIC: User ne join kiya ho ya na kiya ho, Delay true hone par pehle loader hi jayega!
     if sys_db.get("verification_delay_enabled", True):
         status_msg = bot.send_message(chat_id, sys_db.get("verification_text", "⏳ Processing..."))
         
         def process_verification_with_delay():
-            # 5 second ka wait khatam hone ke baad real check trigger hoga
             if not check_user_joined_all(user_id):
                 try:
                     bot.delete_message(chat_id, status_msg.message_id)
@@ -204,7 +220,6 @@ def handle_reward_claim(call):
                 bot.send_message(chat_id, error_msg, parse_mode="HTML")
                 return
 
-            # Clear criteria par clicks increment aur success code dispatch
             sys_db["url_clicks"] += 1
             save_system_data(sys_db)
             
@@ -218,7 +233,6 @@ def handle_reward_claim(call):
         threading.Timer(5.0, process_verification_with_delay).start()
         
     else:
-        # Agar admin ne delay setting OFF rakhi hai, toh instantly channel check hoga
         if not check_user_joined_all(user_id):
             error_msg = (
                 "<b>⚠️ Aapne Join Nahi Kiya!</b>\n\n"
@@ -370,8 +384,8 @@ def handle_admin_inputs(message):
         return
 
     elif text == "📝 Broadcast Button Text":
-        admin_states[user_id] = STATE_BROADCAST_TEXT
-        bot.send_message(message.chat.id, f"📥 Send me the text for the broadcast link button:\n\n<b>Current:</b> {sys_db['broadcast_btn_text']}")
+        admin_states[user_id] = STATE_EDIT_FREE_BTN  # Direct map control matrix flow back to layout execution
+        bot.send_message(message.chat.id, f"📥 Send me the text for the broadcast link button:\n\n<b>Current:</b> {sys_db.get('broadcast_btn_text', '👉 Register Now')}")
         return
 
     elif text == "🔗 Update Channels":
@@ -379,11 +393,15 @@ def handle_admin_inputs(message):
         bot.send_message(message.chat.id, "📥 Send channels separated by space (e.g. @ch1 @ch2 @ch3):")
         return
 
-    # --- ADVANCED TRANSMISSION METRICS PANEL LOGS ENGINE (WITH PIN/UNPIN) ---
+    # --- ADVANCED TRANSMISSION ENGINE (CRASH PROTECTION FIX ACTIVE) ---
     if state in [STATE_FORWARD_BROADCAST, STATE_COPY_BROADCAST]:
         admin_states[user_id] = STATE_NONE
         
-        total_target = len(sys_db["users"])
+        # Taking a thread-safe static snapshot list of users to avoid data race condition
+        with db_lock:
+            target_users_snapshot = list(sys_db["users"])
+            
+        total_target = len(target_users_snapshot)
         success_count = 0
         failed_count = 0
         
@@ -399,16 +417,14 @@ def handle_admin_inputs(message):
             btn_label = sys_db.get("broadcast_btn_text", "👉 Register Now")
             broadcast_markup.add(InlineKeyboardButton(text=btn_label, url=extracted_link))
             
-        for uid in list(sys_db["users"]):
+        for uid in target_users_snapshot:
             sent_msg = None
             try:
-                # 1. Purane pinned message ko har ek user ki chat se automatic unpin karo
                 try:
                     bot.unpin_chat_message(chat_id=uid)
                 except Exception:
                     pass
                 
-                # 2. Message Dispatch Architecture
                 if state == STATE_FORWARD_BROADCAST:
                     if broadcast_markup:
                         sent_msg = bot.copy_message(chat_id=uid, from_chat_id=message.chat.id, message_id=message.message_id, reply_markup=broadcast_markup)
@@ -417,7 +433,6 @@ def handle_admin_inputs(message):
                 else:
                     sent_msg = bot.copy_message(chat_id=uid, from_chat_id=message.chat.id, message_id=message.message_id, reply_markup=broadcast_markup)
                 
-                # 3. Naye sent message ko instantly top par pin lock karo
                 if sent_msg:
                     msg_id_to_pin = sent_msg.message_id if hasattr(sent_msg, 'message_id') else sent_msg.get('message_id')
                     try:
@@ -429,7 +444,6 @@ def handle_admin_inputs(message):
             except Exception:
                 failed_count += 1
                 
-        # 🌟 Aesthetic High-Performance Logs Display Engine
         link_display = extracted_link if extracted_link else "None Detected"
         log_metrics_payload = (
             "📣 <b>Mass Broadcast Transmission Logs:</b>\n\n"
@@ -515,12 +529,9 @@ def handle_admin_inputs(message):
         bot.send_message(message.chat.id, f"✅ Broadcast link button text changed to: <b>{text}</b>", parse_mode="HTML", reply_markup=get_admin_keyboard())
         return
 
-    elif state == STATE_UPDATE_CHANNELS:
-        ch_list = text.split()
-        sys_db["channels"] = ch_list
-        save_system_data(sys_db)
-        admin_states[user_id] = STATE_NONE
-        bot.send_message(message.chat.id, f"✅ Target authentication channels updated to:\n<code>{', '.join(ch_list)}</code>", parse_mode="HTML", reply_markup=get_admin_keyboard())
+    elif text == "🔗 Update Channels":
+        admin_states[user_id] = STATE_UPDATE_CHANNELS
+        bot.send_message(message.chat.id, "📥 Send channels separated by space (e.g. @ch1 @ch2 @ch3):")
         return
 
 # --- BUTTON MANIPULATION INLINE CALLBACK EXECUTOR ---
@@ -553,14 +564,19 @@ def handle_inline_callbacks(call):
         admin_states[call.from_user.id] = STATE_EDIT_BTN_URL
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"📥 Send the new direct Redirect URL Link for button <b>{sys_db['custom_buttons'][idx]['text']}</b>:", parse_mode="HTML")
 
-# --- FLASK WEBSERVER SYSTEM ---
+# --- PERMANENT LIFETIME KEEP-ALIVE & POLING LOOP ---
 @app.route('/')
 def home():
-    return "🚀 System Operational: Profit Masters V3 Master Core Online!", 200
+    return "⚡ Profit Masters Bot is 100% Online and Alive!"
 
-def run_flask():
-    app.run(host="0.0.0.0", port=8080)
+def run():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask).start()
-    bot.polling(none_stop=True)
+    t = threading.Thread(target=run)
+    t.daemon = True
+    t.start()
+    
+    print("🚀 Permanent Polling Engine Started Successfully!")
+    bot.infinity_polling(timeout=20, long_polling_timeout=10)
