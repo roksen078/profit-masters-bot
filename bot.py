@@ -384,7 +384,7 @@ def handle_admin_inputs(message):
         return
 
     elif text == "📝 Broadcast Button Text":
-        admin_states[user_id] = STATE_EDIT_FREE_BTN  # Direct map control matrix flow back to layout execution
+        admin_states[user_id] = STATE_BROADCAST_TEXT  # 🟢 Fixed Mapping flow control lock here
         bot.send_message(message.chat.id, f"📥 Send me the text for the broadcast link button:\n\n<b>Current:</b> {sys_db.get('broadcast_btn_text', '👉 Register Now')}")
         return
 
