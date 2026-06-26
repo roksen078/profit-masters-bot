@@ -5,15 +5,16 @@ from flask import Flask
 import threading
 import random
 import json
-import re  # Text se automatic link extract karne ke liye
+import re
+import uuid  # Unique tracker keys generate karne ke liye
 
 # --- CONFIGURATION & INITIALIZATION ---
-TOKEN = os.getenv("BOT_TOKEN", "8313028390:AAF_6FaXiLndJSvAmSt8Zhc1v1R_Wilssp0")
+TOKEN = os.getenv("BOT_TOKEN", "8801329011:AAEN_Lxz5cTa3tsVDBW0vfYEY30eO-Ogkzk")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 DB_FILE = "users_db.json"
-db_lock = threading.Lock()  # Prevent multi-user write collisions
+db_lock = threading.Lock()
 
 # --- SYSTEM SETTINGS DEFAULT MATRIX ---
 DEFAULT_SETTINGS = {
@@ -33,10 +34,9 @@ DEFAULT_SETTINGS = {
         {"text": "💎 VIP GIFT", "url": "https://t.me/telegram"}
     ],
     "channels": ["@ch1", "@ch2"], 
-    "url_clicks": 0
+    "broadcast_links": {}  # Unique tracking link storage node
 }
 
-# --- UNIFIED JSON DATABASE UTILITIES (CRASH-PROOF HARD HARD PROTECTION) ---
 def load_system_data():
     if os.path.exists(DB_FILE):
         try:
@@ -51,10 +51,9 @@ def load_system_data():
     return DEFAULT_SETTINGS.copy()
 
 def save_system_data(data):
-    with db_lock:  # Multi-threading lock protection active
+    with db_lock:
         try:
             data_copy = data.copy()
-            # Force conversion to list before JSON dumps to avoid type errors
             if "users" in data_copy:
                 if isinstance(data_copy["users"], set):
                     data_copy["users"] = list(data_copy["users"])
@@ -63,31 +62,30 @@ def save_system_data(data):
             with open(DB_FILE, "w") as f:
                 json.dump(data_copy, f, indent=4)
         except Exception as e:
-            print(f"Database core structural save failure error: {e}")
+            print(f"Database structural save error: {e}")
 
 sys_db = load_system_data()
 
-# Strictly verify and lock 'users' as a set in system memory to avoid .add() error
 if "users" not in sys_db or not isinstance(sys_db["users"], (list, set)):
     sys_db["users"] = set()
 else:
     sys_db["users"] = set(sys_db["users"])
 
+if "broadcast_links" not in sys_db:
+    sys_db["broadcast_links"] = {}
+
 def save_user_to_db(user_id):
     try:
-        # Extra safety layer: Ensure sys_db['users'] is indeed a set at runtime
         if not isinstance(sys_db["users"], set):
             sys_db["users"] = set(sys_db["users"])
-            
         if user_id not in sys_db["users"]:
             sys_db["users"].add(user_id)
             save_system_data(sys_db)
     except Exception as e:
-        print(f"User registration safely bypassed to maintain connection: {e}")
+        print(f"User registration bypassed: {e}")
 
 ADMIN_ID = 1908832842  
 
-# SYSTEM STATE MACHINES PIPELINE MATRIX
 STATE_NONE = "NONE"
 STATE_EDIT_PHOTO = "EDIT_PHOTO"
 STATE_EDIT_CAPTION = "EDIT_CAPTION"
@@ -95,7 +93,7 @@ STATE_ADD_BTN_NAME = "ADD_BTN_NAME"
 STATE_ADD_BTN_URL = "ADD_BTN_URL"
 STATE_EDIT_FREE_BTN = "EDIT_FREE_BTN"
 STATE_EDIT_VERIFY_TEXT = "EDIT_VERIFY_TEXT"
-STATE_EDIT_ERROR_TEXT = "EDIT_ERROR_TEXT"  # New state active
+STATE_EDIT_ERROR_TEXT = "EDIT_ERROR_TEXT"
 STATE_UPDATE_CHANNELS = "UPDATE_CHANNELS"
 STATE_BROADCAST_TEXT = "STATE_BROADCAST_TEXT"
 STATE_FORWARD_BROADCAST = "FORWARD_BROADCAST"
@@ -109,7 +107,6 @@ temp_btn_data = {}
 def is_admin(user_id):
     return int(user_id) == int(ADMIN_ID)
 
-# --- FORCE JOIN PROTOCOLS ---
 def check_user_joined_all(user_id):
     if not sys_db["channels"]:
         return True
@@ -122,7 +119,6 @@ def check_user_joined_all(user_id):
             return False 
     return True
 
-# --- REBUILD COMPLEX ADMIN KEYBOARD REPLIES ---
 def get_admin_keyboard():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
@@ -140,26 +136,23 @@ def get_admin_keyboard():
         KeyboardButton("📝 Broadcast Button Text"),
         KeyboardButton("🔗 Update Channels"),
         KeyboardButton("🎚️ Maintenance Mode"),
-        KeyboardButton("🔄 Reset URL Click Counter")
+        KeyboardButton("🔄 Reset All Link Tracking Data")
     )
-    
     delay_status = "🟢 Delay Status: ON" if sys_db.get("verification_delay_enabled", True) else "🔴 Delay Status: OFF"
     markup.add(
         KeyboardButton(delay_status),
         KeyboardButton("⏳ Edit Verification Text"),
-        KeyboardButton("📝 Edit Join Error Text"),  # New Admin Button added here
+        KeyboardButton("📝 Edit Join Error Text"),
         KeyboardButton("📥 Export Users Data")
     )
     return markup
 
-# --- UTILITY: TEXT ME SE FIRST LINK EXTRACT KARNE KA CORE LOGIC ---
 def extract_first_link(text):
     if not text:
         return None
     urls = re.findall(r'(https?://\S+|t\.me/\S+)', text)
     return urls[0] if urls else None
 
-# --- USER ROUTING LOGIC ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
@@ -214,15 +207,10 @@ def handle_reward_claim(call):
                     bot.delete_message(chat_id, status_msg.message_id)
                 except Exception:
                     pass
-                
-                # Dynamic error string pulled safely from JSON matrix
                 error_msg = sys_db.get("error_text", "<b>⚠️ Aapne Join Nahi Kiya!</b>")
                 bot.send_message(chat_id, error_msg, parse_mode="HTML")
                 return
 
-            sys_db["url_clicks"] += 1
-            save_system_data(sys_db)
-            
             generated_code = f"IW7-PROMO-{random.randint(100000, 999999)}"
             try:
                 bot.delete_message(chat_id, status_msg.message_id)
@@ -238,11 +226,21 @@ def handle_reward_claim(call):
             bot.send_message(chat_id, error_msg, parse_mode="HTML")
             return
 
-        sys_db["url_clicks"] += 1
-        save_system_data(sys_db)
-        
         generated_code = f"IW7-PROMO-{random.randint(100000, 999999)}"
         bot.send_message(chat_id, f"🎁 <b>Verification Successful!</b>\n\n🔑 Your Code: <code>{generated_code}</code>", parse_mode="HTML")
+
+# --- BROADCAST LIVE TRACKER INTERCEPTOR ROUTER ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("track_lnk_"))
+def handle_tracked_link_clicks(call):
+    link_id = call.data.replace("track_lnk_", "")
+    if link_id in sys_db.get("broadcast_links", {}):
+        sys_db["broadcast_links"][link_id]["clicks"] += 1
+        save_system_data(sys_db)
+        # User ko redirect URL alert window ke through safely provide kiya jayega bina user functionality tode
+        target_url = sys_db["broadcast_links"][link_id]["url"]
+        bot.answer_callback_query(call.id, url=target_url)
+    else:
+        bot.answer_callback_query(call.id, "⚠️ Link configuration error or expired link data.", show_alert=True)
 
 # --- ADMINISTRATIVE PIPELINE ENGINE ---
 @bot.message_handler(func=lambda message: is_admin(message.from_user.id), content_types=['text', 'photo', 'video', 'document', 'animation'])
@@ -316,12 +314,12 @@ def handle_admin_inputs(message):
 
     elif text == "⏩ Forward Broadcast":
         admin_states[user_id] = STATE_FORWARD_BROADCAST
-        bot.send_message(message.chat.id, "📢 Send or forward any message/post now. Bot will auto-extract link and attach custom button! [Mode: BROADCAST_FORWARD]:")
+        bot.send_message(message.chat.id, "📢 Send or forward any message/post now. Bot will auto-track link and attach tracked live button! [Mode: BROADCAST_FORWARD]:")
         return
 
     elif text == "📝 Copy Broadcast":
         admin_states[user_id] = STATE_COPY_BROADCAST
-        bot.send_message(message.chat.id, "📢 Send or forward any message/post now. Bot will auto-extract link and attach custom button! [Mode: BROADCAST_COPY]:")
+        bot.send_message(message.chat.id, "📢 Send or forward any message/post now. Bot will auto-track link and attach tracked live button! [Mode: BROADCAST_COPY]:")
         return
 
     elif text == "📸 Change Photo":
@@ -335,13 +333,26 @@ def handle_admin_inputs(message):
         return
 
     elif text == "📊 Analytics & Stats":
-        bot.send_message(message.chat.id, f"📊 <b>Core Analytics Database Node:</b>\n\n👥 Total Unique Users: <code>{len(sys_db['users'])}</code>\n⚡ Total Verification Clicks: <code>{sys_db['url_clicks']}</code>", parse_mode="HTML")
+        report_str = "📊 <b>Core Analytics & Broadcast Links Tracker Node:</b>\n\n"
+        report_str += f"👥 Total Unique Users: <code>{len(sys_db['users'])}</code>\n"
+        report_str += "───────────────────\n"
+        report_str += "🔗 <b>Live Broadcast Link Clicks:</b>\n"
+        
+        tracked_links = sys_db.get("broadcast_links", {})
+        if not tracked_links:
+            report_str += "<i>Abhi koi links data tracked nahi h.</i>"
+        else:
+            # Sirf top 15 links text layout optimize rakhne k liye list honge
+            for l_id, info in list(tracked_links.items())[-15:]:
+                report_str += f"📍 <code>{info['url'][:30]}...</code> ➜ <b>{info['clicks']} Clicks</b>\n"
+                
+        bot.send_message(message.chat.id, report_str, parse_mode="HTML")
         return
 
-    elif text == "🔄 Reset URL Click Counter":
-        sys_db["url_clicks"] = 0
+    elif text == "🔄 Reset All Link Tracking Data":
+        sys_db["broadcast_links"] = {}
         save_system_data(sys_db)
-        bot.send_message(message.chat.id, "✅ URL Click counter has been reset to 0.")
+        bot.send_message(message.chat.id, "✅ Tracking node refresh completed. All broadcast link metrics reset to 0.")
         return
 
     elif text == "+ Add Welcome Button":
@@ -385,7 +396,7 @@ def handle_admin_inputs(message):
         return
 
     elif text == "📝 Broadcast Button Text":
-        admin_states[user_id] = STATE_BROADCAST_TEXT  # Perfectly mapped control sequence link
+        admin_states[user_id] = STATE_BROADCAST_TEXT
         bot.send_message(message.chat.id, f"📥 Send me the text for the broadcast link button:\n\n<b>Current:</b> {sys_db.get('broadcast_btn_text', '👉 Register Now')}")
         return
 
@@ -394,7 +405,7 @@ def handle_admin_inputs(message):
         bot.send_message(message.chat.id, "📥 Send channels separated by space (e.g. @ch1 @ch2 @ch3):")
         return
 
-    # --- ADVANCED TRANSMISSION ENGINE (CRASH PROTECTION FIX ACTIVE) ---
+    # --- ADVANCED TRANSMISSION ENGINE (WITH INDIVIDUAL LINK TRACKING KEYS) ---
     if state in [STATE_FORWARD_BROADCAST, STATE_COPY_BROADCAST]:
         admin_states[user_id] = STATE_NONE
         
@@ -413,12 +424,18 @@ def handle_admin_inputs(message):
             
         broadcast_markup = None
         if extracted_link:
+            link_uuid = str(uuid.uuid4())[:8]  # Unique identification segment
+            sys_db["broadcast_links"][link_uuid] = {
+                "url": extracted_link,
+                "clicks": 0
+            }
+            save_system_data(sys_db)
+            
             broadcast_markup = InlineKeyboardMarkup()
             btn_label = sys_db.get("broadcast_btn_text", "👉 Register Now")
-            broadcast_markup.add(InlineKeyboardButton(text=btn_label, url=extracted_link))
+            broadcast_markup.add(InlineKeyboardButton(text=btn_label, callback_data=f"track_lnk_{link_uuid}"))
             
         for uid in target_users_snapshot:
-            sent_msg = None
             try:
                 try:
                     bot.unpin_chat_message(chat_id=uid)
@@ -450,7 +467,8 @@ def handle_admin_inputs(message):
             f"👥 Total Target Baseline: <code>{total_target}</code>\n"
             f"✅ Sent Successfully: <code>{success_count}</code>\n"
             f"❌ Failed Deliveries: <code>{failed_count}</code>\n"
-            f"🔗 Link Extracted: <code>{link_display}</code>"
+            f"🔗 Tracked Link: <code>{link_display}</code>\n\n"
+            f"💡 <i>Is link ke live clicks dekhne k liye 'Analytics & Stats' par click karein!</i>"
         )
         bot.send_message(message.chat.id, log_metrics_payload, parse_mode="HTML")
         return
@@ -546,9 +564,7 @@ def handle_admin_inputs(message):
 def handle_inline_callbacks(call):
     if not is_admin(call.from_user.id):
         return
-        
     data = call.data
-    
     if data.startswith("del_"):
         idx = int(data.split("_")[1])
         try:
@@ -558,20 +574,18 @@ def handle_inline_callbacks(call):
             bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="✅ Button removed permanently from database structure.")
         except Exception:
             bot.answer_callback_query(call.id, "Error in processing deletion.")
-            
     elif data.startswith("edtxt_"):
         idx = int(data.split("_")[1])
         temp_btn_data[call.from_user.id] = {"idx": idx}
         admin_states[call.from_user.id] = STATE_EDIT_BTN_TEXT
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"📥 Enter the fresh Text String name for button <b>{sys_db['custom_buttons'][idx]['text']}</b>:", parse_mode="HTML")
-
     elif data.startswith("edurl_"):
         idx = int(data.split("_")[1])
         temp_btn_data[call.from_user.id] = {"idx": idx}
         admin_states[call.from_user.id] = STATE_EDIT_BTN_URL
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"📥 Send the new direct Redirect URL Link for button <b>{sys_db['custom_buttons'][idx]['text']}</b>:", parse_mode="HTML")
 
-# --- PERMANENT LIFETIME KEEP-ALIVE & POLING LOOP ---
+# --- PERMANENT LIFETIME KEEP-ALIVE & POLLING LOOP ---
 @app.route('/')
 def home():
     return "⚡ Profit Masters Bot is 100% Online and Alive!"
